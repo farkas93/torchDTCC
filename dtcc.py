@@ -1,8 +1,5 @@
 import torch
 import torch.nn as nn
-import torch.optim as optim
-import numpy as np
-from torch.utils.data import DataLoader, Dataset
 
 class DilatedRNN(nn.Module):
     def __init__(self, input_dim, hidden_dim, num_layers, bidirectional=True):
@@ -39,9 +36,28 @@ class DilatedRNN(nn.Module):
         return torch.cat(outputs, dim=1)
     
     def _apply_dilation(self, x, dilation_rate):
-        # Implementation of dilated RNN
-        # For simplicity, this is a placeholder
-        return x  # In a real implementation, apply actual dilation
+        """
+        Apply dilation to the input sequence.
+        
+        Args:
+            x: Input tensor of shape [batch_size, seq_len, feature_dim]
+            dilation_rate: Dilation rate (skipping factor)
+            
+        Returns:
+            Dilated sequence
+        """
+        batch_size, seq_len, feature_dim = x.size()
+        
+        # Calculate new sequence length after dilation
+        new_seq_len = seq_len // dilation_rate
+        if new_seq_len == 0:
+            new_seq_len = 1
+        
+        # Create dilated sequence by selecting time steps with the dilation rate
+        dilated_indices = torch.arange(0, new_seq_len, device=x.device) * dilation_rate
+        dilated_x = torch.index_select(x, 1, dilated_indices)
+        
+        return dilated_x
 
 
 class Encoder(nn.Module):
@@ -163,53 +179,3 @@ class DTCC(nn.Module):
         entropy = -torch.sum(P_q * torch.log(P_q + 1e-8)) - torch.sum(P_q_aug * torch.log(P_q_aug + 1e-8))
         
         return cluster_loss - entropy
-
-
-def train_dtcc(model, dataloader, optimizer, lambda_cd, num_epochs, update_interval=5):
-    for epoch in range(num_epochs):
-        total_loss = 0
-        
-        for i, batch in enumerate(dataloader):
-            x = batch  # Assuming batch is already time series data
-            
-            # Apply augmentation to create augmented view
-            x_aug = augment_time_series(x)  # You need to implement this function
-            
-            # Forward pass
-            z, z_aug, x_recon, x_aug_recon = model(x, x_aug)
-            
-            # Compute losses
-            recon_loss = model.compute_reconstruction_loss(x, x_recon, x_aug, x_aug_recon)
-            instance_loss = model.compute_instance_contrastive_loss(z, z_aug)
-            cd_loss, Q, Q_aug = model.compute_cluster_distribution_loss(z, z_aug)
-            cluster_loss = model.compute_cluster_contrastive_loss(Q, Q_aug)
-            
-            # Total loss
-            total_loss = recon_loss + instance_loss + cluster_loss + lambda_cd * cd_loss
-            
-            # Backward and optimize
-            optimizer.zero_grad()
-            total_loss.backward()
-            optimizer.step()
-            
-            # Update cluster indicators periodically
-            if epoch % update_interval == 0 and i == 0:
-                # This would be handled internally in compute_cluster_distribution_loss
-                pass
-                
-        print(f"Epoch {epoch+1}/{num_epochs}, Loss: {total_loss.item()}")
-    
-    # Return final clustering result
-    z_all = []
-    model.eval()
-    with torch.no_grad():
-        for batch in dataloader:
-            z = model.encoder(batch)
-            z_all.append(z)
-    
-    z_all = torch.cat(z_all, dim=0)
-    gram_matrix = torch.matmul(z_all.T, z_all)
-    U, S, V = torch.svd(gram_matrix)
-    Q_final = U[:, :model.num_clusters]
-    
-    return Q_final
