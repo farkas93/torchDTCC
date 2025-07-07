@@ -25,7 +25,7 @@ class DTCCTrainer:
         self.update_interval = update_interval
         self.device = device
 
-    def run(self):
+    def run(self, save_path=None):
         self.model.train()
         for epoch in range(self.num_epochs):
             epoch_loss = 0
@@ -47,18 +47,12 @@ class DTCCTrainer:
 
             print(f"Epoch {epoch+1}/{self.num_epochs}, Avg Loss: {epoch_loss / len(self.dataloader):.4f}")
 
-        # Extract Q for the full dataset
-        self.model.eval()
-        z_all = []
-        with torch.no_grad():
-            for batch in self.dataloader:
-                batch = batch.to(self.device)
-                z = self.model.encoder(batch)
-                z_all.append(z)
-        z_all = torch.cat(z_all, dim=0)
-        U, S, Vh = torch.linalg.svd(z_all, full_matrices=False)
-        Q_final = U[:, :self.model.num_clusters]
-        return Q_final
+        # Save model if path provided
+        if save_path is not None:
+            torch.save(self.model.state_dict(), save_path)
+            print(f"Model saved to {save_path}")
+
+        return self.model
 
     @staticmethod
     def from_config(config, augment_time_series):
