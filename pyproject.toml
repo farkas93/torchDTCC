@@ -29,11 +29,3 @@ dev = [
     "black",
     "flake8"
 ]
-
-[tool.setuptools]
-package-dir = {"" = "torchdtcc"}
-packages = ["torchdtcc"]
-include-package-data = true
-
-[tool.setuptools.package-data]
-torchdtcc = ["*.py"]
