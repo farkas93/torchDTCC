@@ -1,6 +1,7 @@
 from datasets.arff_dataset import ArffDataset
 from scipy.io import arff
-from timeseries.augmentations import torch_augmentation_wrapper, jitter
+from torchdtcc.augmentations.basic import jitter
+from torchdtcc.augmentations.helper import torch_augmentation_wrapper
 import pandas as pd
 
 class MeatArffDataset(ArffDataset):

@@ -1,204 +1,9 @@
 import numpy as np
 from tqdm import tqdm
-from typing import Optional, Callable, List, Tuple, Union
-from timeseries.dtw import DTW
-
-def _check_shape(x):
-    assert x.ndim == 3, f"Input must be [batch, seq_len, features], got {x.shape}"
-
-def _ensure_float32(x):
-    if x.dtype != np.float32:
-        return x.astype(np.float32)
-    return x
-
-def jitter(x, sigma=0.03, random_state=None):
-    """
-    Adds Gaussian noise to the input.
-    Reference: https://arxiv.org/pdf/1706.00527.pdf
-    """
-    _check_shape(x)
-    rng = np.random.RandomState(random_state)
-    return _ensure_float32(x + rng.normal(loc=0., scale=sigma, size=x.shape))
-
-def scaling(x, sigma=0.1, random_state=None):
-    """
-    Multiplies input by a random scaling factor for each feature.
-    Reference: https://arxiv.org/pdf/1706.00527.pdf
-    """
-    _check_shape(x)
-    rng = np.random.RandomState(random_state)
-    factor = rng.normal(loc=1., scale=sigma, size=(x.shape[0], x.shape[2]))
-    return _ensure_float32(np.multiply(x, factor[:, np.newaxis, :]))
-
-def rotation(x, random_state=None):
-    """
-    Randomly flips and permutes feature axes.
-    """
-    _check_shape(x)
-    rng = np.random.RandomState(random_state)
-    flip = rng.choice([-1, 1], size=(x.shape[0], x.shape[2]))
-    rotate_axis = np.arange(x.shape[2])
-    rng.shuffle(rotate_axis)
-    return _ensure_float32(flip[:, np.newaxis, :] * x[:, :, rotate_axis])
-
-def permutation(x, max_segments=5, seg_mode="equal", random_state=None):
-    """
-    Randomly permutes segments of the time series.
-    """
-    _check_shape(x)
-    rng = np.random.RandomState(random_state)
-    orig_steps = np.arange(x.shape[1])
-    num_segs = rng.randint(1, max_segments, size=(x.shape[0]))
-    ret = np.zeros_like(x)
-    for i, pat in enumerate(x):
-        if num_segs[i] > 1:
-            if seg_mode == "random":
-                split_points = rng.choice(x.shape[1]-2, num_segs[i]-1, replace=False)
-                split_points.sort()
-                splits = np.split(orig_steps, split_points)
-            else:
-                splits = np.array_split(orig_steps, num_segs[i])
-            warp = np.concatenate(rng.permutation(splits)).ravel()
-            ret[i] = pat[warp]
-        else:
-            ret[i] = pat
-    return _ensure_float32(ret)
-
-def magnitude_warp(x, sigma=0.2, knot=4, random_state=None):
-    """
-    Warps the magnitude of the series using random smooth curves.
-    """
-    from scipy.interpolate import CubicSpline
-    _check_shape(x)
-    rng = np.random.RandomState(random_state)
-    orig_steps = np.arange(x.shape[1])
-    random_warps = rng.normal(loc=1.0, scale=sigma, size=(x.shape[0], knot+2, x.shape[2]))
-    warp_steps = (np.ones((x.shape[2],1))*(np.linspace(0, x.shape[1]-1., num=knot+2))).T
-    ret = np.zeros_like(x)
-    for i, pat in enumerate(x):
-        warper = np.array([CubicSpline(warp_steps[:,dim], random_warps[i,:,dim])(orig_steps) for dim in range(x.shape[2])]).T
-        ret[i] = pat * warper
-    return _ensure_float32(ret)
-
-def time_warp(x, sigma=0.2, knot=4, random_state=None):
-    """
-    Warps the time axis using smooth curves.
-    """
-    from scipy.interpolate import CubicSpline
-    _check_shape(x)
-    rng = np.random.RandomState(random_state)
-    orig_steps = np.arange(x.shape[1])
-    random_warps = rng.normal(loc=1.0, scale=sigma, size=(x.shape[0], knot+2, x.shape[2]))
-    warp_steps = (np.ones((x.shape[2],1))*(np.linspace(0, x.shape[1]-1., num=knot+2))).T
-    ret = np.zeros_like(x)
-    for i, pat in enumerate(x):
-        for dim in range(x.shape[2]):
-            time_warp_curve = CubicSpline(warp_steps[:,dim], warp_steps[:,dim] * random_warps[i,:,dim])(orig_steps)
-            scale = (x.shape[1]-1)/time_warp_curve[-1] if time_warp_curve[-1] != 0 else 1.0
-            ret[i,:,dim] = np.interp(orig_steps, np.clip(scale*time_warp_curve, 0, x.shape[1]-1), pat[:,dim]).T
-    return _ensure_float32(ret)
-
-def window_slice(x, reduce_ratio=0.9, random_state=None):
-    """
-    Randomly slices a window from the time series and rescales back to original size.
-    Reference: https://halshs.archives-ouvertes.fr/halshs-01357973/document
-    """
-    _check_shape(x)
-    rng = np.random.RandomState(random_state)
-    target_len = np.ceil(reduce_ratio*x.shape[1]).astype(int)
-    if target_len >= x.shape[1]:
-        return _ensure_float32(x)
-    starts = rng.randint(low=0, high=x.shape[1]-target_len, size=(x.shape[0])).astype(int)
-    ends = (target_len + starts).astype(int)
-    ret = np.zeros_like(x)
-    for i, pat in enumerate(x):
-        for dim in range(x.shape[2]):
-            ret[i,:,dim] = np.interp(np.linspace(0, target_len-1, num=x.shape[1]), np.arange(target_len), pat[starts[i]:ends[i],dim]).T
-    return _ensure_float32(ret)
-
-def window_warp(x, window_ratio=0.1, scales=[0.5, 2.], random_state=None):
-    """
-    Warps a random window in the series by a random scale and resamples to original length.
-    Reference: https://halshs.archives-ouvertes.fr/halshs-01357973/document
-    """
-    _check_shape(x)
-    rng = np.random.RandomState(random_state)
-    warp_scales = rng.choice(scales, x.shape[0])
-    warp_size = np.ceil(window_ratio*x.shape[1]).astype(int)
-    window_steps = np.arange(warp_size)
-    window_starts = rng.randint(low=1, high=x.shape[1]-warp_size-1, size=(x.shape[0])).astype(int)
-    window_ends = (window_starts + warp_size).astype(int)
-    ret = np.zeros_like(x)
-    for i, pat in enumerate(x):
-        for dim in range(x.shape[2]):
-            start_seg = pat[:window_starts[i],dim]
-            window_seg = np.interp(np.linspace(0, warp_size-1, num=int(warp_size*warp_scales[i])), window_steps, pat[window_starts[i]:window_ends[i],dim])
-            end_seg = pat[window_ends[i]:,dim]
-            warped = np.concatenate((start_seg, window_seg, end_seg))
-            ret[i,:,dim] = np.interp(np.arange(x.shape[1]), np.linspace(0, warped.size-1, num=x.shape[1]), warped).T
-    return _ensure_float32(ret)
-
-def random_time_series_augmentation(
-    x: np.ndarray,
-    labels: Optional[np.ndarray] = None,
-    random_state: Optional[int] = None,
-    allow_label_dependent: bool = False
-) -> np.ndarray:
-    """
-    Randomly applies a time-series augmentation.
-    If labels are provided and allow_label_dependent=True, may select label-dependent augmentations.
-    """
-    _check_shape(x)
-    rng = np.random.RandomState(random_state)
-    # List of (func, needs_labels)
-    aug_funcs: List[Tuple[Callable, bool]] = [
-        (jitter, False),
-        (scaling, False),
-        (rotation, False),
-        (permutation, False),
-        (magnitude_warp, False),
-        (time_warp, False),
-        (window_slice, False),
-        (window_warp, False),
-    ]
-    if allow_label_dependent and labels is not None:
-        # These require labels and external DTW code, so only include if possible
-        try:
-            from utils import dtw  # Will raise ImportError if not available
-            aug_funcs.extend([
-                # (spawner, True),  # Uncomment if dtw is available and tested
-                # (wdba, True),
-                # (random_guided_warp, True),
-                # (random_guided_warp_shape, True),
-                # (discriminative_guided_warp, True),
-                # (discriminative_guided_warp_shape, True),
-            ])
-        except ImportError:
-            pass
-
-    idx = rng.randint(0, len(aug_funcs))
-    func, needs_labels = aug_funcs[idx]
-    if needs_labels and labels is not None:
-        return func(x, labels, random_state=random_state)
-    return func(x, random_state=random_state)
-
-def torch_augmentation_wrapper(
-    aug_fn: Callable, 
-    x: 'torch.Tensor', 
-    labels: Optional['torch.Tensor'] = None,
-    **kwargs
-) -> 'torch.Tensor':
-    """
-    Wrapper to apply numpy augmentations on torch tensors.
-    """
-    import torch
-    x_np = x.detach().cpu().numpy()
-    if labels is not None:
-        labels_np = labels.detach().cpu().numpy()
-        aug_np = aug_fn(x_np, labels_np, **kwargs)
-    else:
-        aug_np = aug_fn(x_np, **kwargs)
-    return torch.from_numpy(aug_np).to(x.device).type_as(x)
+from typing import Optional, List, Tuple
+from torchdtcc.augmentations.helper import check_shape, ensure_float32
+from torchdtcc.augmentations.basic import window_slice, jitter
+from torchdtcc.augmentations.dtw import DTW
 
 # Example docstring for a label-dependent augmentation:
 def spawner(x, labels, sigma=0.05, verbose=0, random_state=None) -> Tuple[np.ndarray, List[int]]:
@@ -209,7 +14,7 @@ def spawner(x, labels, sigma=0.05, verbose=0, random_state=None) -> Tuple[np.nda
         - List of indices where no augmentation was possible (skipped indices)
     Reference: https://www.ncbi.nlm.nih.gov/pmc/articles/PMC6983028/
     """
-    _check_shape(x)
+    check_shape(x)
     rng = np.random.RandomState(random_state)
     random_points = rng.randint(low=1, high=x.shape[1]-1, size=x.shape[0])
     window = np.ceil(x.shape[1] / 10.).astype(int)
@@ -233,7 +38,7 @@ def spawner(x, labels, sigma=0.05, verbose=0, random_state=None) -> Tuple[np.nda
                 print(f"Only one pattern of class {l[i]}, skipping pattern average.")
             ret[i,:] = pat
             skipped.append(i)
-    return _ensure_float32(jitter(ret, sigma=sigma, random_state=random_state)), skipped
+    return ensure_float32(jitter(ret, sigma=sigma, random_state=random_state)), skipped
 
 def wdba(
     x: np.ndarray, 
@@ -249,7 +54,7 @@ def wdba(
     Returns augmented data and list of skipped indices.
     Reference: https://ieeexplore.ieee.org/document/8215569
     """
-    _check_shape(x)
+    check_shape(x)
     rng = np.random.RandomState(random_state)
     window = np.ceil(x.shape[1] / 10.).astype(int) if use_window else None
     orig_steps = np.arange(x.shape[1])
@@ -297,7 +102,7 @@ def wdba(
                 print(f"Only one pattern of class {l[i]}, skipping pattern average.")
             ret[i, :] = x[i]
             skipped.append(i)
-    return _ensure_float32(ret), skipped
+    return ensure_float32(ret), skipped
 
 def random_guided_warp(
     x: np.ndarray, 
@@ -312,7 +117,7 @@ def random_guided_warp(
     Random guided DTW warping using intra-class prototypes.
     Returns augmented data and list of skipped indices.
     """
-    _check_shape(x)
+    check_shape(x)
     rng = np.random.RandomState(random_state)
     window = np.ceil(x.shape[1] / 10.).astype(int) if use_window else None
     orig_steps = np.arange(x.shape[1])
@@ -336,7 +141,7 @@ def random_guided_warp(
                 print(f"Only one pattern of class {l[i]}, skipping timewarping.")
             ret[i, :] = pat
             skipped.append(i)
-    return _ensure_float32(ret), skipped
+    return ensure_float32(ret), skipped
 
 def discriminative_guided_warp(
     x: np.ndarray, 
@@ -353,7 +158,7 @@ def discriminative_guided_warp(
     Discriminative guided warping based on intra- and inter-class prototypes.
     Returns augmented data and list of skipped indices.
     """
-    _check_shape(x)
+    check_shape(x)
     rng = np.random.RandomState(random_state)
     window = np.ceil(x.shape[1] / 10.).astype(int) if use_window else None
     orig_steps = np.arange(x.shape[1])
@@ -403,4 +208,4 @@ def discriminative_guided_warp(
         else:
             for i, pat in enumerate(ret):
                 ret[i] = window_slice(pat[np.newaxis, :, :], reduce_ratio=0.9+0.1*warp_amount[i]/max_warp)[0]
-    return _ensure_float32(ret), skipped
+    return ensure_float32(ret), skipped

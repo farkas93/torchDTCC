@@ -1,15 +1,15 @@
 import yaml
-from dtcc.trainer import DTCCTrainer
-from dtcc.clustering import Clusterer
+from torchdtcc.dtcc.trainer import DTCCTrainer
+from torchdtcc.dtcc.clustering import Clusterer
 from torch.utils.data import DataLoader
-from augmentations import augment_time_series
+from torchdtcc.datasets.meat.arff_meat import MeatArffDataset 
 
 
 with open("config.yaml", "r") as f:
     config = yaml.safe_load(f)
 
 # Prepare dataset and dataloader
-dataset = MyTimeSeriesDataset(file_path="data/test.npy")
+dataset = MeatArffDataset(file_path="./data/meat/")
 dataloader = DataLoader(dataset, batch_size=64, shuffle=False)
 
 def load_model_clustering_example():
@@ -26,12 +26,12 @@ def load_model_clustering_example():
 
 def use_model_clustering_example(model):
     clusterer = Clusterer()
-    model_kwargs = config.get("model", {})
-    clusterer.set_model(model, model_kwargs["num_clusters"])
+    num_clusters = config.get("model", {}).copy().pop("num_clusters", 3)
+    clusterer.set_model(model, num_clusters)
     return clusterer
 
 def run_training():    
-    trainer = DTCCTrainer.from_config("config.yaml", augment_time_series)
+    trainer = DTCCTrainer.from_config("config.yaml", dataset.augmentation)
     model_path = config.get("model", {}).copy().pop("path", "")
     return trainer.run(save_path=model_path)
 
