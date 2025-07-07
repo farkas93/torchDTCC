@@ -1,14 +1,14 @@
 import torch
-import yaml
 import importlib
+from dtcc.dtcc import DTCC
 from torch.utils.data import DataLoader
 import torch.optim as optim
 
 class DTCCTrainer:
     def __init__(
         self,
-        model,
-        dataloader,
+        model : DTCC,
+        dataloader : DataLoader,
         augment_time_series,
         optimizer,
         lambda_cd,
@@ -61,9 +61,7 @@ class DTCCTrainer:
         return Q_final
 
     @staticmethod
-    def from_config(config_path, augment_time_series):
-        with open(config_path, "r") as f:
-            config = yaml.safe_load(f)
+    def from_config(config, augment_time_series):
         model_cfg = config["model"]
         data_cfg = config["data"]
         trainer_cfg = config.get("trainer", {})
@@ -75,8 +73,6 @@ class DTCCTrainer:
         dataset = DatasetClass(**data_cfg["dataset_args"])
         dataloader = DataLoader(dataset, batch_size=data_cfg["batch_size"], shuffle=True)
 
-        # Import model class (assumes DTCC is in dtcc.py)
-        from dtcc import DTCC
         model = DTCC(
             model_cfg["input_dim"],
             model_cfg["hidden_dim"],
