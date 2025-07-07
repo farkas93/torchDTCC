@@ -13,7 +13,7 @@ dataset = MyTimeSeriesDataset(file_path="data/test.npy")
 dataloader = DataLoader(dataset, batch_size=64, shuffle=False)
 
 def load_model_clustering_example():
-    model_kwargs = config.get("model", {})
+    model_kwargs = config.get("model", {}).copy()
     model_path = model_kwargs.pop("path", "")
 
     clusterer = Clusterer()
@@ -32,7 +32,8 @@ def use_model_clustering_example(model):
 
 def run_training():    
     trainer = DTCCTrainer.from_config("config.yaml", augment_time_series)
-    return trainer.run()
+    model_path = config.get("model", {}).copy().pop("path", "")
+    return trainer.run(save_path=model_path)
 
 if __name__ == "__main__":
     model = run_training()
