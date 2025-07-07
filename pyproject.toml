@@ -30,5 +30,6 @@ dev = [
     "flake8"
 ]
 
-[tool.setuptools]
-packages = ["torchdtcc"]
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["torchdtcc*"]
