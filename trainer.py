@@ -9,7 +9,7 @@ class DTCCTrainer:
         self.dataloader = dataloader
         self.augment_time_series = augment_time_series
         self.optimizer = optimizer
-        self.lambd_cd = lambda_cd
+        self.lambda_cd = lambda_cd
         self.num_epochs = num_epochs
         self.update_interval = update_interval
 
