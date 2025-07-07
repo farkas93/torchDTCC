@@ -1,0 +1,24 @@
+# config.yaml
+
+model:
+  path: "dtcc_model.pth"
+  input_dim:  # e.g., 10
+  hidden_dim:  # e.g., 32
+  latent_dim:  # e.g., 64
+  num_layers:  # e.g., 3
+  num_clusters:  # e.g., 5
+
+data:
+  dataset_class: "my_dataset.MyTimeSeriesDataset"
+  dataset_args:   # Arguments to initialize your dataset class
+    file_path: "data/my_timeseries.npy"
+    # add more args as needed
+
+  batch_size: 64
+
+output:
+  soft_clusters: "soft_clusters.npy"
+  hard_clusters_argmax: "hard_clusters_argmax.npy"
+  hard_clusters_kmeans: "hard_clusters_kmeans.npy"
+
+device: "cuda"  # or "cpu"
