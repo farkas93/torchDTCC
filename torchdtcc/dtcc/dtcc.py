@@ -1,34 +1,33 @@
 import torch
 import torch.nn as nn
+from typing import List
 from torchdtcc.dtcc.constants import EPS
 
 class DilatedRNN(nn.Module):
-    def __init__(self, input_dim, hidden_dim, num_layers, bidirectional=True):
+    def __init__(self, input_dim, num_layers, hidden_dim, dilation_rates, bidirectional=True):
         super(DilatedRNN, self).__init__()
         self.num_layers = num_layers
-        self.hidden_dim = hidden_dim
+        self.hidden_dims = hidden_dim
+        self.dilation_rates = dilation_rates
         self.bidirectional = bidirectional
         
         self.rnn_layers = nn.ModuleList()
         for i in range(num_layers):
             if i == 0:
-                self.rnn_layers.append(nn.GRU(input_dim, hidden_dim, batch_first=True, 
+                self.rnn_layers.append(nn.GRU(input_dim, self.hidden_dims[i], batch_first=True, 
                                              bidirectional=bidirectional))
             else:
-                self.rnn_layers.append(nn.GRU(hidden_dim * (2 if bidirectional else 1), 
-                                             hidden_dim, batch_first=True, 
+                input_size = self.hidden_dims[i-1] * (2 if bidirectional else 1)
+                self.rnn_layers.append(nn.GRU(input_size, self.hidden_dims[i], batch_first=True, 
                                              bidirectional=bidirectional))
                 
-    def forward(self, x, dilation_rates=None):
-        if dilation_rates is None:
-            dilation_rates = [2**i for i in range(self.num_layers)]
-            
+    def forward(self, x):            
         outputs = []
         current_input = x
         
         for i, layer in enumerate(self.rnn_layers):
             # Apply dilation
-            dilated_input = self._apply_dilation(current_input, dilation_rates[i])
+            dilated_input = self._apply_dilation(current_input, self.dilation_rates[i])
             output, hidden = layer(dilated_input)
             outputs.append(hidden.view(hidden.size(1), -1))  # Extract last hidden state
             current_input = output
@@ -58,19 +57,19 @@ class DilatedRNN(nn.Module):
 
 
 class Encoder(nn.Module):
-    def __init__(self, input_dim, hidden_dim, latent_dim, num_layers):
+    def __init__(self, input_dim, num_layers, hidden_dim, dilation_rates):
         super(Encoder, self).__init__()
-        self.dilated_rnn = DilatedRNN(input_dim, hidden_dim, num_layers)
+        self.dilated_rnn = DilatedRNN(input_dim, num_layers, hidden_dim, dilation_rates)
         
     def forward(self, x):
         return self.dilated_rnn(x)
 
 
 class Decoder(nn.Module):
-    def __init__(self, latent_dim, hidden_dim, output_dim):
+    def __init__(self, latent_dim, output_dim):
         super(Decoder, self).__init__()
-        self.rnn = nn.GRU(latent_dim, hidden_dim, batch_first=True)
-        self.output_layer = nn.Linear(hidden_dim, output_dim)
+        self.rnn = nn.GRU(latent_dim, latent_dim, batch_first=True)
+        self.output_layer = nn.Linear(latent_dim, output_dim)
         
     def forward(self, z, seq_len):
         # Expand z to sequence length
@@ -78,16 +77,24 @@ class Decoder(nn.Module):
         output, _ = self.rnn(z_expanded)
         return self.output_layer(output)
 
-
 class DTCC(nn.Module):
-    def __init__(self, input_dim, hidden_dim, latent_dim, num_layers, num_clusters):
+    def __init__(self, 
+                 input_dim: int, 
+                 num_layers: int, 
+                 num_clusters: int,
+                 hidden_dims: List[int], 
+                 dilation_rates: List[int], 
+                 tau_I: float = 0.5,
+                 tau_C: float = 0.5):
         super(DTCC, self).__init__()
-        # TODO: Shouldn't this be two pairs of encoder/decoder?
-        self.encoder = Encoder(input_dim, hidden_dim, latent_dim, num_layers)
-        self.decoder = Decoder(latent_dim, hidden_dim, input_dim)
+        latent_dim = sum(hidden_dims) * 2 # the hidden dims times 2 for being bidirectional
+        self.encoder = Encoder(input_dim, num_layers, hidden_dims, dilation_rates)
+        self.decoder = Decoder(latent_dim, input_dim)
+        self.aug_encoder = Encoder(input_dim, num_layers, hidden_dims, dilation_rates)
+        self.aug_decoder = Decoder(latent_dim, input_dim)
         self.num_clusters = num_clusters
-        self.tau_I = 0.5  # Instance temperature
-        self.tau_C = 0.5  # Cluster temperature
+        self.tau_I = tau_I  # Instance temperature
+        self.tau_C = tau_C  # Cluster temperature
         
     def forward(self, x, x_aug):
         # Original view
@@ -95,8 +102,8 @@ class DTCC(nn.Module):
         x_recon = self.decoder(z, x.size(1))
         
         # Augmented view
-        z_aug = self.encoder(x_aug)
-        x_aug_recon = self.decoder(z_aug, x_aug.size(1))
+        z_aug = self.aug_encoder(x_aug)
+        x_aug_recon = self.aug_decoder(z_aug, x_aug.size(1))
         
         return z, z_aug, x_recon, x_aug_recon
     
@@ -135,7 +142,7 @@ class DTCC(nn.Module):
         denominator_aug = torch.sum(exp_sim_aug * neg_mask, dim=1) + torch.exp(positives_aug)
         instance_loss_aug = -torch.mean(positives_aug - torch.log(denominator_aug + EPS))
         
-        return (instance_loss + instance_loss_aug) / 2
+        return 0.5 * (instance_loss + instance_loss_aug) 
     
     def compute_cluster_distribution_loss(self, z, z_aug):
         # SVD for original view

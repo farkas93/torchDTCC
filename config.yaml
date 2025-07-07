@@ -1,27 +1,30 @@
-# config.yaml
+# torchdtcc config.yaml
 
 model:
-  path: "dtcc_model.pth"
-  input_dim:  # e.g., 10
-  hidden_dim:  # e.g., 32
-  latent_dim:  # e.g., 64
-  num_layers:  # e.g., 3
-  num_clusters:  # e.g., 5
+  input_dim:  1
+  num_layers:  3
+  num_clusters: 3
+  hidden_dim:  [100, 50, 50]
+  dilation_rates: [1, 4, 16]
+  tau_I: 1.0
+  tau_C: 1.0
+
+trainer:
+  save_path: "dtcc_model.pth"
+  learning_rate: 0.005
+  weight_decay: 0
+  lambda_cd: 0.001
+  num_epochs: 200
+  update_interval: 5
 
 data:
-  dataset_class: "my_dataset.MyTimeSeriesDataset"
+  dataset_class: "torchdtcc.datasets.meat.MeatArffDataset"
   dataset_args:   # Arguments to initialize your dataset class
-    file_path: "data/my_timeseries.npy"
+    files_path: "./data/meat/"
     # add more args as needed
 
   batch_size: 64
 
-trainer:
-  learning_rate: 0.001
-  weight_decay: 0
-  lambda_cd: 1.0
-  num_epochs: 100
-  update_interval: 5
 
 output:
   soft_clusters: "soft_clusters.npy"

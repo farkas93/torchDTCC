@@ -1,10 +1,10 @@
-from datasets.arff_dataset import ArffDataset
+from torchdtcc.datasets.augmented_dataset import AugmentedDataset
 from scipy.io import arff
 from torchdtcc.augmentations.basic import jitter
 from torchdtcc.augmentations.helper import torch_augmentation_wrapper
 import pandas as pd
 
-class MeatArffDataset(ArffDataset):
+class MeatArffDataset(AugmentedDataset):
     def __init__(self, path):
         data_train, _ = arff.loadarff(path + 'Meat_TRAIN.arff')
         data_test, _ = arff.loadarff(path + 'Meat_TEST.arff')

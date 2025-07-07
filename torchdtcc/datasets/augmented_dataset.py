@@ -2,7 +2,7 @@ import torch
 from torch.utils.data import Dataset
 from abc import abstractmethod
 
-class ArffDataset(Dataset):
+class AugmentedDataset(Dataset):
     def __init__(self, dataframe, feature_cols, target_col):
         self.X = dataframe[feature_cols].values.astype('float32')
         self.y = dataframe[target_col].astype('int64').values

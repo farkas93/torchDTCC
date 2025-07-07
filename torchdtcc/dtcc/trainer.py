@@ -1,6 +1,8 @@
 import torch
 import importlib
 from dtcc.dtcc import DTCC
+from typing import Dict
+from torchdtcc.datasets.augmented_dataset import AugmentedDataset
 from torch.utils.data import DataLoader
 import torch.optim as optim
 
@@ -38,6 +40,7 @@ class DTCCTrainer:
                 instance_loss = self.model.compute_instance_contrastive_loss(z, z_aug)
                 cd_loss, Q, Q_aug = self.model.compute_cluster_distribution_loss(z, z_aug)
                 cluster_loss = self.model.compute_cluster_contrastive_loss(Q, Q_aug)
+                #TODO: Figure out if additional L2 regularizer would benefit the training?
                 loss = recon_loss + instance_loss + cluster_loss + self.lambda_cd * cd_loss
 
                 self.optimizer.zero_grad()
@@ -55,24 +58,22 @@ class DTCCTrainer:
         return self.model
 
     @staticmethod
-    def from_config(config, augment_time_series):
+    def from_config(config: Dict, dataset: AugmentedDataset):
         model_cfg = config["model"]
         data_cfg = config["data"]
         trainer_cfg = config.get("trainer", {})
         device = torch.device(config["device"] if torch.cuda.is_available() else "cpu")
 
-        # Dynamically import dataset class
-        module_path, class_name = data_cfg["dataset_class"].rsplit(".", 1)
-        DatasetClass = getattr(importlib.import_module(module_path), class_name)
-        dataset = DatasetClass(**data_cfg["dataset_args"])
         dataloader = DataLoader(dataset, batch_size=data_cfg["batch_size"], shuffle=True)
 
         model = DTCC(
-            model_cfg["input_dim"],
-            model_cfg["hidden_dim"],
-            model_cfg["latent_dim"],
-            model_cfg["num_layers"],
-            model_cfg["num_clusters"]
+            input_dim=model_cfg["input_dim"],
+            num_layers=model_cfg["num_layers"],
+            num_clusters=model_cfg["num_clusters"],
+            hidden_dims=model_cfg["hidden_dims"],
+            dilation_rates=model_cfg["dilation_rates"],
+            tau_I=model_cfg["tau_I"],
+            tau_C=model_cfg["tau_C"]
         ).to(device)
 
         optimizer = optim.Adam(
@@ -84,7 +85,7 @@ class DTCCTrainer:
         return DTCCTrainer(
             model=model,
             dataloader=dataloader,
-            augment_time_series=augment_time_series,
+            augment_time_series=dataset.augmentation,
             optimizer=optimizer,
             lambda_cd=trainer_cfg.get("lambda_cd", 1.0),
             num_epochs=trainer_cfg.get("num_epochs", 100),
