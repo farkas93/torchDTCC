@@ -29,3 +29,6 @@ dev = [
     "black",
     "flake8"
 ]
+
+[tool.setuptools]
+packages = ["torchdtcc"]
