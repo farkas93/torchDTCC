@@ -4,7 +4,19 @@ from sklearn.cluster import KMeans
 from dtcc.dtcc import DTCC
 
 class Clusterer:
-    def __init__(self, model_path, model_kwargs, device="cpu"):
+    def __init__(self):
+        pass
+
+    def set_model(self, model, num_clusters):
+        """
+        Args:
+            model (DTCC): trained DTCC model object
+            num_clusters (int): number of clusters the model is able to cluster
+        """
+        self.model = model
+        self.num_clusters = num_clusters
+
+    def load_model(self, model_path, model_kwargs, device="cpu"):
         """
         Args:
             model_path (str): Path to model weights (.pth)
@@ -18,6 +30,7 @@ class Clusterer:
         self.model.to(self.device)
         self.model.eval()
         self.num_clusters = model_kwargs["num_clusters"]
+
 
     def encode(self, dataloader):
         zs = []
