@@ -1,5 +1,6 @@
 import torch
 import torch.nn as nn
+from utils import EPS
 
 class DilatedRNN(nn.Module):
     def __init__(self, input_dim, hidden_dim, num_layers, bidirectional=True):
@@ -37,27 +38,23 @@ class DilatedRNN(nn.Module):
     
     def _apply_dilation(self, x, dilation_rate):
         """
-        Apply dilation to the input sequence.
-        
+        Apply dilation to input sequence.
         Args:
-            x: Input tensor of shape [batch_size, seq_len, feature_dim]
-            dilation_rate: Dilation rate (skipping factor)
-            
+            x: [batch_size, seq_len, feature_dim]
+            dilation_rate: int
         Returns:
-            Dilated sequence
+            Dilated x: [batch_size, new_seq_len, feature_dim]
         """
         batch_size, seq_len, feature_dim = x.size()
-        
-        # Calculate new sequence length after dilation
-        new_seq_len = seq_len // dilation_rate
-        if new_seq_len == 0:
-            new_seq_len = 1
-        
-        # Create dilated sequence by selecting time steps with the dilation rate
-        dilated_indices = torch.arange(0, new_seq_len, device=x.device) * dilation_rate
-        dilated_x = torch.index_select(x, 1, dilated_indices)
-        
-        return dilated_x
+        if seq_len < dilation_rate:
+            # Fallback: just return the last time step (or pad)
+            last_step = x[:, -1:, :]  # shape: [batch, 1, feature_dim]
+            return last_step
+        else:
+            # Usual dilation
+            indices = torch.arange(0, seq_len, dilation_rate, device=x.device)
+            dilated_x = torch.index_select(x, 1, indices)
+            return dilated_x
 
 
 class Encoder(nn.Module):
@@ -85,6 +82,7 @@ class Decoder(nn.Module):
 class DTCC(nn.Module):
     def __init__(self, input_dim, hidden_dim, latent_dim, num_layers, num_clusters):
         super(DTCC, self).__init__()
+        # TODO: Shouldn't this be two pairs of encoder/decoder?
         self.encoder = Encoder(input_dim, hidden_dim, latent_dim, num_layers)
         self.decoder = Decoder(latent_dim, hidden_dim, input_dim)
         self.num_clusters = num_clusters
@@ -112,43 +110,47 @@ class DTCC(nn.Module):
         z_norm = nn.functional.normalize(z, dim=1)
         z_aug_norm = nn.functional.normalize(z_aug, dim=1)
         
-        # Compute similarity matrix
+        # z -> z_aug
         sim_matrix = torch.matmul(z_norm, z_aug_norm.T) / self.tau_I
-        
-        # Positive pairs are on the diagonal
+        max_sim_mat = sim_matrix.max(dim=1, keepdim=True)[0]
+        sim_matrix = sim_matrix - max_sim_mat  # shift for stability
+
         positives = torch.diag(sim_matrix)
-        
-        # For each z_i, compute denominator (sum over all possible negatives)
         exp_sim = torch.exp(sim_matrix)
         mask = torch.eye(n, device=z.device)
         neg_mask = 1 - mask
         
+        # denominator: all except the positive
         denominator = torch.sum(exp_sim * neg_mask, dim=1) + torch.exp(positives)
-        instance_loss = -torch.mean(torch.log(torch.exp(positives) / denominator))
+        # Correct: log(exp(x)/y) = x - log(y)
+        instance_loss = -torch.mean(positives - torch.log(denominator + EPS))
         
-        # Repeat for the augmented view
+        # z_aug -> z
         sim_matrix_aug = torch.matmul(z_aug_norm, z_norm.T) / self.tau_I
+        max_sim_mat_aug = sim_matrix_aug.max(dim=1, keepdim=True)[0]
+        sim_matrix_aug = sim_matrix_aug - max_sim_mat_aug
+
         positives_aug = torch.diag(sim_matrix_aug)
         exp_sim_aug = torch.exp(sim_matrix_aug)
         denominator_aug = torch.sum(exp_sim_aug * neg_mask, dim=1) + torch.exp(positives_aug)
-        instance_loss_aug = -torch.mean(torch.log(torch.exp(positives_aug) / denominator_aug))
+        instance_loss_aug = -torch.mean(positives_aug - torch.log(denominator_aug + EPS))
         
         return (instance_loss + instance_loss_aug) / 2
     
     def compute_cluster_distribution_loss(self, z, z_aug):
         # SVD for original view
-        gram_matrix = torch.matmul(z.T, z)
-        U, S, V = torch.svd(gram_matrix)
+        U, S, V = torch.linalg.svd(z)
         Q = U[:, :self.num_clusters]
         
         # SVD for augmented view
-        gram_matrix_aug = torch.matmul(z_aug.T, z_aug)
-        U_aug, S_aug, V_aug = torch.svd(gram_matrix_aug)
+        U_aug, S_aug, V_aug = torch.linalg.svd(z_aug)
         Q_aug = U_aug[:, :self.num_clusters]
         
         # Compute k-means loss
-        km_org = torch.trace(torch.matmul(z.T, z)) - torch.trace(torch.matmul(torch.matmul(Q.T, torch.matmul(z.T, z)), Q))
-        km_aug = torch.trace(torch.matmul(z_aug.T, z_aug)) - torch.trace(torch.matmul(torch.matmul(Q_aug.T, torch.matmul(z_aug.T, z_aug)), Q_aug))
+        gram_matrix = torch.matmul(z.T, z)
+        gram_matrix_aug = torch.matmul(z_aug.T, z_aug)
+        km_org = torch.trace(gram_matrix) - torch.trace(torch.matmul(torch.matmul(Q.T, gram_matrix), Q))
+        km_aug = torch.trace(gram_matrix_aug) - torch.trace(torch.matmul(torch.matmul(Q_aug.T, gram_matrix_aug), Q_aug))
         
         return 0.5 * (km_org + km_aug), Q, Q_aug
     
@@ -171,11 +173,11 @@ class DTCC(nn.Module):
         neg_mask = 1 - mask
         
         denominator = torch.sum(exp_sim * neg_mask, dim=1) + torch.exp(positives)
-        cluster_loss = -torch.mean(torch.log(torch.exp(positives) / denominator))
+        cluster_loss = -torch.mean(torch.log(torch.exp(positives) / (denominator+EPS) + EPS))
         
         # Compute entropy term
         P_q = torch.mean(Q, dim=0)
         P_q_aug = torch.mean(Q_aug, dim=0)
-        entropy = -torch.sum(P_q * torch.log(P_q + 1e-8)) - torch.sum(P_q_aug * torch.log(P_q_aug + 1e-8))
+        entropy = -torch.sum(P_q * torch.log(P_q + EPS)) - torch.sum(P_q_aug * torch.log(P_q_aug + EPS))
         
         return cluster_loss - entropy
