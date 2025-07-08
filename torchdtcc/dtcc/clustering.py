@@ -9,7 +9,7 @@ class Clusterer:
         self.device = torch.device(device if torch.cuda.is_available() else "cpu")
         pass
 
-    def set_model(self, model, num_clusters):
+    def set_model(self, model, num_clusters, stable_svd=False):
         """
         Args:
             model (DTCC): trained DTCC model object
@@ -17,6 +17,7 @@ class Clusterer:
         """
         self.model = model
         self.num_clusters = num_clusters
+        self.stable_svd = stable_svd
 
     def load_model(self, model_path, model_kwargs, device="cpu"):
         """
@@ -32,6 +33,7 @@ class Clusterer:
         self.model.to(self.device)
         self.model.eval()
         self.num_clusters = model_kwargs["num_clusters"]
+        self.stable_svd = model_kwargs["stable_svd"]
 
 
     def encode(self, dataloader):
@@ -45,7 +47,9 @@ class Clusterer:
         return torch.cat(zs, dim=0)  # shape [N, d]
 
     def soft_clusters(self, z_all):
-        U, S, V = torch.linalg.svd(stablize(z_all))
+        if self.stable_svd:
+            z_all = stablize(z_all)
+        U, S, V = torch.linalg.svd(z_all)
         Q = U[:, :self.num_clusters]
         return Q
 

@@ -90,7 +90,8 @@ class DTCC(nn.Module):
                  hidden_dims: List[int], 
                  dilation_rates: List[int], 
                  tau_I: float = 0.5,
-                 tau_C: float = 0.5):
+                 tau_C: float = 0.5,
+                 stable_svd: bool = False):
         super(DTCC, self).__init__()
         latent_dim = sum(hidden_dims) * 2 # the hidden dims times 2 for being bidirectional
         self.encoder = Encoder(input_dim, num_layers, hidden_dims, dilation_rates, latent_dim)
@@ -100,6 +101,7 @@ class DTCC(nn.Module):
         self.num_clusters = num_clusters
         self.tau_I = tau_I  # Instance temperature
         self.tau_C = tau_C  # Cluster temperature
+        self.stable_svd = stable_svd
         self._init_weights()
     
     def _init_weights(self):
@@ -174,18 +176,21 @@ class DTCC(nn.Module):
         assert not torch.isnan(z_aug).any(), "NaN in z_aug before SVD"
         assert not torch.isinf(z_aug).any(), "Inf in z_aug before SVD"
         
+        logging.debug(f"original z:\n {z}")
+        logging.debug(f"original z_aug:\n {z_aug}")
+        if self.stable_svd:
+            z = stablize(z)
+            logging.debug(f"stablized z:\n {z}")
+            z_aug = stablize(z_aug)
+            logging.debug(f"stablized z_aug:\n {z_aug}")
+
         # SVD for original view
-        logging.debug(f"original z:\n {z}")
-        z = stablize(z)
-        logging.debug(f"original z:\n {z}")
         U, S, V = torch.linalg.svd(z)  # z: [batch_size, latent_dim]
         Q = U[:, :self.num_clusters]  # [batch_size, num_clusters]
         assert not torch.isnan(Q).any(), "NaN in Q after SVD"
 
         # SVD for augmented view
-        logging.debug(f"original z_aug:\n {z_aug}")
-        z_aug = stablize(z_aug)
-        logging.debug(f"stablized z_aug:\n {z_aug}")
+        
         U_aug, S_aug, V_aug = torch.linalg.svd(z_aug)
         Q_aug = U_aug[:, :self.num_clusters]
         assert not torch.isnan(Q_aug).any(), "NaN in Q_aug after SVD"

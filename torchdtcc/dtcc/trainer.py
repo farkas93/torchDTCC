@@ -2,6 +2,8 @@
 import torch
 import torch.optim as optim
 from torch.utils.data import DataLoader
+from tqdm import tqdm
+import logging
 from typing import Dict
 from .dtcc import DTCC
 from torchdtcc.datasets.augmented_dataset import AugmentedDataset
@@ -31,31 +33,59 @@ class DTCCTrainer:
         self.model.train()
         for epoch in range(self.num_epochs):
             epoch_loss = 0
-            for i, batch in enumerate(self.dataloader):
-                print(f"Step {i}")
-                x, y = batch  # Unpack features and targets
-                x = x.to(self.device)
-                x_aug = self.augment_time_series(x)
-                z, z_aug, x_recon, x_aug_recon = self.model(x, x_aug)
-                recon_loss = self.model.compute_reconstruction_loss(x, x_recon, x_aug, x_aug_recon)
-                instance_loss = self.model.compute_instance_contrastive_loss(z, z_aug)
-                cd_loss, Q, Q_aug = self.model.compute_cluster_distribution_loss(z, z_aug)
-                cluster_loss = self.model.compute_cluster_contrastive_loss(Q, Q_aug)
-                #TODO: Figure out if additional L2 regularizer would benefit the training?
-                loss = recon_loss + instance_loss + cluster_loss + self.lambda_cd * cd_loss
-                print("recon_loss: {}, instance_loss: {}, cd_loss: {}, cluster_loss: {}, total_loss: {}".format(recon_loss, instance_loss, cd_loss, cluster_loss, loss))
+            recon_losses, instance_losses, cd_losses, cluster_losses, total_losses = [], [], [], [], []
+            with tqdm(total=len(self.dataloader), desc=f'Epoch {epoch+1}/{self.num_epochs}') as pbar:
+                for i, batch in enumerate(self.dataloader):
+                    x, y = batch  # Unpack features and targets
+                    x = x.to(self.device)
+                    x_aug = self.augment_time_series(x)
+                    z, z_aug, x_recon, x_aug_recon = self.model(x, x_aug)
+                    recon_loss = self.model.compute_reconstruction_loss(x, x_recon, x_aug, x_aug_recon)
+                    instance_loss = self.model.compute_instance_contrastive_loss(z, z_aug)
+                    cd_loss, Q, Q_aug = self.model.compute_cluster_distribution_loss(z, z_aug)
+                    cluster_loss = self.model.compute_cluster_contrastive_loss(Q, Q_aug)
+                    loss = recon_loss + instance_loss + cluster_loss + self.lambda_cd * cd_loss
 
-                self.optimizer.zero_grad()
-                loss.backward()
-                self.optimizer.step()
-                epoch_loss += loss.item()
+                    # Track losses
+                    recon_losses.append(recon_loss.item())
+                    instance_losses.append(instance_loss.item())
+                    cd_losses.append(cd_loss.item())
+                    cluster_losses.append(cluster_loss.item())
+                    total_losses.append(loss.item())
 
-            print(f"Epoch {epoch+1}/{self.num_epochs}, Avg Loss: {epoch_loss / len(self.dataloader):.4f}")
+                    # Logging
+                    logging.debug(
+                        f"Step {i} | recon: {recon_loss.item():.4f} | instance: {instance_loss.item():.4f} | cd: {cd_loss.item():.4f} | cluster: {cluster_loss.item():.4f} | total: {loss.item():.4f}"
+                    )
 
-        # Save model if path provided
-        if save_path is not None:
-            torch.save(self.model.state_dict(), save_path)
-            print(f"Model saved to {save_path}")
+                    self.optimizer.zero_grad()
+                    loss.backward()
+                    self.optimizer.step()
+                    epoch_loss += loss.item()
+
+                    pbar.set_postfix({
+                        'recon': f"{recon_loss.item():.3f}",
+                        'inst': f"{instance_loss.item():.3f}",
+                        'cd': f"{cd_loss.item():.3f}",
+                        'clust': f"{cluster_loss.item():.3f}",
+                        'total': f"{loss.item():.3f}"
+                    })
+                    pbar.update(1)
+
+            # Epoch averages
+            avg_recon = sum(recon_losses) / len(recon_losses)
+            avg_instance = sum(instance_losses) / len(instance_losses)
+            avg_cd = sum(cd_losses) / len(cd_losses)
+            avg_cluster = sum(cluster_losses) / len(cluster_losses)
+            avg_total = sum(total_losses) / len(total_losses)
+
+            logging.info(
+                f"Epoch {epoch+1}/{self.num_epochs} | avg recon: {avg_recon:.4f} | avg instance: {avg_instance:.4f} | avg cd: {avg_cd:.4f} | avg cluster: {avg_cluster:.4f} | avg total: {avg_total:.4f}"
+            )
+
+            if save_path is not None:
+                torch.save(self.model.state_dict(), save_path)
+                logging.info(f"Model saved to {save_path}")
 
         return self.model
 
@@ -75,7 +105,8 @@ class DTCCTrainer:
             hidden_dims=model_cfg["hidden_dims"],
             dilation_rates=model_cfg["dilation_rates"],
             tau_I=model_cfg["tau_I"],
-            tau_C=model_cfg["tau_C"]
+            tau_C=model_cfg["tau_C"],
+            stable_svd=model_cfg["stable_svd"]
         ).to(device)
 
         optimizer = optim.Adam(
