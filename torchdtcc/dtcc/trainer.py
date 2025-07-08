@@ -1,10 +1,10 @@
+
 import torch
-import importlib
-from dtcc.dtcc import DTCC
-from typing import Dict
-from torchdtcc.datasets.augmented_dataset import AugmentedDataset
-from torch.utils.data import DataLoader
 import torch.optim as optim
+from torch.utils.data import DataLoader
+from typing import Dict
+from .dtcc import DTCC
+from torchdtcc.datasets.augmented_dataset import AugmentedDataset
 
 class DTCCTrainer:
     def __init__(

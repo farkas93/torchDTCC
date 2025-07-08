@@ -1,7 +1,7 @@
 import torch
 import numpy as np
 from sklearn.cluster import KMeans
-from dtcc.dtcc import DTCC
+from .dtcc import DTCC
 
 class Clusterer:
     def __init__(self):

@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 from typing import List
-from torchdtcc.dtcc.constants import EPS
+from .constants import EPS
 
 class DilatedRNN(nn.Module):
     def __init__(self, input_dim, num_layers, hidden_dim, dilation_rates, bidirectional=True):

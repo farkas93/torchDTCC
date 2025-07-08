@@ -1,9 +1,9 @@
 import numpy as np
 from tqdm import tqdm
 from typing import Optional, List, Tuple
-from torchdtcc.augmentations.helper import check_shape, ensure_float32
-from torchdtcc.augmentations.basic import window_slice, jitter
-from torchdtcc.augmentations.dtw import DTW
+from .helper import check_shape, ensure_float32
+from .basic import window_slice, jitter
+from .dtw import DTW
 
 # Example docstring for a label-dependent augmentation:
 def spawner(x, labels, sigma=0.05, verbose=0, random_state=None) -> Tuple[np.ndarray, List[int]]:

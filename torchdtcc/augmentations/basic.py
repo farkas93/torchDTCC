@@ -1,5 +1,5 @@
 import numpy as np
-from torchdtcc.augmentations.helper import check_shape, ensure_float32
+from .helper import check_shape, ensure_float32
 
 def jitter(x, sigma=0.03, random_state=None):
     """

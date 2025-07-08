@@ -1,8 +1,8 @@
-from torchdtcc.datasets.augmented_dataset import AugmentedDataset
 from scipy.io import arff
+import pandas as pd
 from torchdtcc.augmentations.basic import jitter
 from torchdtcc.augmentations.helper import torch_augmentation_wrapper
-import pandas as pd
+from ..augmented_dataset import AugmentedDataset
 
 class MeatArffDataset(AugmentedDataset):
     def __init__(self, path):
