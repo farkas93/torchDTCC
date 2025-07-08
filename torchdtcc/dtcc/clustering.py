@@ -2,6 +2,7 @@ import torch
 import numpy as np
 from sklearn.cluster import KMeans
 from .dtcc import DTCC
+from .helper import stablize
 
 class Clusterer:
     def __init__(self, device):
@@ -44,7 +45,7 @@ class Clusterer:
         return torch.cat(zs, dim=0)  # shape [N, d]
 
     def soft_clusters(self, z_all):
-        U, S, Vh = torch.linalg.svd(z_all, full_matrices=False)
+        U, S, V = torch.linalg.svd(stablize(z_all))
         Q = U[:, :self.num_clusters]
         return Q
 

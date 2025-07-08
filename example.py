@@ -41,3 +41,4 @@ if __name__ == "__main__":
     dataloader = DataLoader(dataset, batch_size=data_cfg.get("batch_size", 64), shuffle=False)
     clusterer = use_model_clustering_example(model)
     labels = clusterer.cluster(dataloader, method="kmeans")  # or "soft", "argmax"
+    print(f"resulting predictions:\n{labels}")

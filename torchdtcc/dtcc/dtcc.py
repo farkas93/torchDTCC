@@ -1,7 +1,8 @@
+import logging
 import torch
 import torch.nn as nn
 from typing import List
-from .constants import EPS
+from .helper import EPS, stablize
 
 class DilatedRNN(nn.Module):
     def __init__(self, input_dim, num_layers, hidden_dim, dilation_rates, bidirectional=True):
@@ -99,7 +100,25 @@ class DTCC(nn.Module):
         self.num_clusters = num_clusters
         self.tau_I = tau_I  # Instance temperature
         self.tau_C = tau_C  # Cluster temperature
-        
+        self._init_weights()
+    
+    def _init_weights(self):
+        # Xavier/Glorot init
+        for m in self.modules():
+            if isinstance(m, nn.GRU):
+                for name, param in m.named_parameters():
+                    if 'weight' in name:
+                        nn.init.xavier_uniform_(param)
+                    elif 'bias' in name:
+                        nn.init.zeros_(param)
+            elif isinstance(m, nn.Linear):
+                nn.init.xavier_uniform_(m.weight)
+                if m.bias is not None:
+                    nn.init.zeros_(m.bias)
+            elif isinstance(m, nn.LayerNorm):
+                nn.init.ones_(m.weight)
+                nn.init.zeros_(m.bias)
+
     def forward(self, x, x_aug):
         assert x.ndim == 3, f"Input must be 3D, got {x.shape}"
         # Original view
@@ -150,23 +169,26 @@ class DTCC(nn.Module):
         return 0.5 * (instance_loss + instance_loss_aug) 
     
     def compute_cluster_distribution_loss(self, z, z_aug):
+        assert not torch.isnan(z).any(), "NaN in z before SVD"
+        assert not torch.isinf(z).any(), "Inf in z before SVD"
+        assert not torch.isnan(z_aug).any(), "NaN in z_aug before SVD"
+        assert not torch.isinf(z_aug).any(), "Inf in z_aug before SVD"
+        
         # SVD for original view
-        #print(f"original z:\n {z}")
-        z = z + 1e-6 * torch.randn_like(z)
-        z = torch.nan_to_num(z, nan=0.0, posinf=5.0, neginf=-5.0)
-        z = torch.clamp(z, -5, 5)
-        #print(f"original z:\n {z}")
-        U, S, Vh = torch.linalg.svd(z)  # z: [batch_size, latent_dim]
+        logging.debug(f"original z:\n {z}")
+        z = stablize(z)
+        logging.debug(f"original z:\n {z}")
+        U, S, V = torch.linalg.svd(z)  # z: [batch_size, latent_dim]
         Q = U[:, :self.num_clusters]  # [batch_size, num_clusters]
+        assert not torch.isnan(Q).any(), "NaN in Q after SVD"
 
         # SVD for augmented view
-        #print(f"original z_aug:\n {z_aug}")
-        z_aug = z_aug + 1e-6 * torch.randn_like(z_aug)        
-        z_aug = torch.nan_to_num(z_aug, nan=0.0, posinf=5.0, neginf=-5.0)
-        z_aug = torch.clamp(z_aug, -5, 5)
-        #print(f"stablized z_aug:\n {z_aug}")
-        U_aug, S_aug, Vh_aug = torch.linalg.svd(z_aug)
+        logging.debug(f"original z_aug:\n {z_aug}")
+        z_aug = stablize(z_aug)
+        logging.debug(f"stablized z_aug:\n {z_aug}")
+        U_aug, S_aug, V_aug = torch.linalg.svd(z_aug)
         Q_aug = U_aug[:, :self.num_clusters]
+        assert not torch.isnan(Q_aug).any(), "NaN in Q_aug after SVD"
 
         # Compute k-means loss
         gram_matrix = torch.matmul(z.T, z)           # [latent_dim, latent_dim]
@@ -185,6 +207,8 @@ class DTCC(nn.Module):
         return 0.5 * (km_org + km_aug), Q, Q_aug
     
     def compute_cluster_contrastive_loss(self, Q, Q_aug):
+        logging.debug("Q:\n{}".format(Q))
+        logging.debug("Q_aug:\n{}".format(Q_aug))
         k = Q.size(1)
         
         # Normalize Q and Q_aug
@@ -207,7 +231,13 @@ class DTCC(nn.Module):
         
         # Compute entropy term
         P_q = torch.mean(Q, dim=0)
+        # tends to go down to negative close zero
         P_q_aug = torch.mean(Q_aug, dim=0)
-        entropy = -torch.sum(P_q * torch.log(P_q + EPS)) - torch.sum(P_q_aug * torch.log(P_q_aug + EPS))
+        # Apply clamp for numerical stability
+        P_q = torch.clamp(P_q, min=EPS)
+        P_q_aug = torch.clamp(P_q_aug, min=EPS)
+        logging.debug("P_q:\n{}".format(P_q))
+        logging.debug("P_q_aug:\n{}".format(P_q_aug))
+        entropy = -torch.sum(P_q * torch.log(P_q)) - torch.sum(P_q_aug * torch.log(P_q_aug))
         
         return cluster_loss - entropy

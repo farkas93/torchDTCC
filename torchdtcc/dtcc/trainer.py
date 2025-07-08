@@ -43,6 +43,7 @@ class DTCCTrainer:
                 cluster_loss = self.model.compute_cluster_contrastive_loss(Q, Q_aug)
                 #TODO: Figure out if additional L2 regularizer would benefit the training?
                 loss = recon_loss + instance_loss + cluster_loss + self.lambda_cd * cd_loss
+                print("recon_loss: {}, instance_loss: {}, cd_loss: {}, cluster_loss: {}, total_loss: {}".format(recon_loss, instance_loss, cd_loss, cluster_loss, loss))
 
                 self.optimizer.zero_grad()
                 loss.backward()
