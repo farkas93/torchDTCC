@@ -9,7 +9,7 @@ with open("config.yaml", "r") as f:
 
 # Prepare dataset and dataloader
 data_cfg = config.get("data", {})
-dataset = MeatArffDataset(file_path="./data/meat/")
+dataset = MeatArffDataset(path=data_cfg['dataset_args']['files_path'])
 
 def load_model_clustering_example():
     model_kwargs = config.get("model", {})
@@ -24,13 +24,13 @@ def load_model_clustering_example():
     return clusterer
 
 def use_model_clustering_example(model):
-    clusterer = Clusterer()
-    num_clusters = config.get("model", {}).copy().pop("num_clusters", 3)
+    clusterer = Clusterer(config["device"])
+    num_clusters = config.get("model", {}).get("num_clusters", 3)
     clusterer.set_model(model, num_clusters)
     return clusterer
 
 def run_training():    
-    trainer = DTCCTrainer.from_config("config.yaml", dataset)
+    trainer = DTCCTrainer.from_config(config, dataset)
     save_path = config.get("trainer", {}).get("save_path", "")
     return trainer.run(save_path=save_path)
 

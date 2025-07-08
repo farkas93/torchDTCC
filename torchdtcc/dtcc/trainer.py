@@ -32,8 +32,9 @@ class DTCCTrainer:
         for epoch in range(self.num_epochs):
             epoch_loss = 0
             for i, batch in enumerate(self.dataloader):
-                batch = batch.to(self.device)
-                x = batch
+                print(f"Step {i}")
+                x, y = batch  # Unpack features and targets
+                x = x.to(self.device)
                 x_aug = self.augment_time_series(x)
                 z, z_aug, x_recon, x_aug_recon = self.model(x, x_aug)
                 recon_loss = self.model.compute_reconstruction_loss(x, x_recon, x_aug, x_aug_recon)

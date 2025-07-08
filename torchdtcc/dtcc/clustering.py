@@ -4,7 +4,8 @@ from sklearn.cluster import KMeans
 from .dtcc import DTCC
 
 class Clusterer:
-    def __init__(self):
+    def __init__(self, device):
+        self.device = torch.device(device if torch.cuda.is_available() else "cpu")
         pass
 
     def set_model(self, model, num_clusters):
@@ -36,8 +37,9 @@ class Clusterer:
         zs = []
         with torch.no_grad():
             for batch in dataloader:
-                batch = batch.to(self.device)
-                z = self.model.encoder(batch)
+                X, y = batch
+                X = X.to(self.device)
+                z = self.model.encoder(X)
                 zs.append(z)
         return torch.cat(zs, dim=0)  # shape [N, d]
 

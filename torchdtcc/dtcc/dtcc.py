@@ -21,7 +21,8 @@ class DilatedRNN(nn.Module):
                 self.rnn_layers.append(nn.GRU(input_size, self.hidden_dims[i], batch_first=True, 
                                              bidirectional=bidirectional))
                 
-    def forward(self, x):            
+    def forward(self, x):
+        assert x.ndim == 3, f"Input must be 3D, got {x.shape}"        
         outputs = []
         current_input = x
         
@@ -57,12 +58,15 @@ class DilatedRNN(nn.Module):
 
 
 class Encoder(nn.Module):
-    def __init__(self, input_dim, num_layers, hidden_dim, dilation_rates):
+    def __init__(self, input_dim, num_layers, hidden_dim, dilation_rates, latent_dim):
         super(Encoder, self).__init__()
         self.dilated_rnn = DilatedRNN(input_dim, num_layers, hidden_dim, dilation_rates)
+        self.norm = nn.LayerNorm(latent_dim)
         
     def forward(self, x):
-        return self.dilated_rnn(x)
+        assert x.ndim == 3, f"Input must be 3D, got {x.shape}"
+        z = self.dilated_rnn(x)
+        return self.norm(z)
 
 
 class Decoder(nn.Module):
@@ -88,15 +92,16 @@ class DTCC(nn.Module):
                  tau_C: float = 0.5):
         super(DTCC, self).__init__()
         latent_dim = sum(hidden_dims) * 2 # the hidden dims times 2 for being bidirectional
-        self.encoder = Encoder(input_dim, num_layers, hidden_dims, dilation_rates)
+        self.encoder = Encoder(input_dim, num_layers, hidden_dims, dilation_rates, latent_dim)
         self.decoder = Decoder(latent_dim, input_dim)
-        self.aug_encoder = Encoder(input_dim, num_layers, hidden_dims, dilation_rates)
+        self.aug_encoder = Encoder(input_dim, num_layers, hidden_dims, dilation_rates, latent_dim)
         self.aug_decoder = Decoder(latent_dim, input_dim)
         self.num_clusters = num_clusters
         self.tau_I = tau_I  # Instance temperature
         self.tau_C = tau_C  # Cluster temperature
         
     def forward(self, x, x_aug):
+        assert x.ndim == 3, f"Input must be 3D, got {x.shape}"
         # Original view
         z = self.encoder(x)
         x_recon = self.decoder(z, x.size(1))
@@ -146,19 +151,37 @@ class DTCC(nn.Module):
     
     def compute_cluster_distribution_loss(self, z, z_aug):
         # SVD for original view
-        U, S, V = torch.linalg.svd(z)
-        Q = U[:, :self.num_clusters]
-        
+        #print(f"original z:\n {z}")
+        z = z + 1e-6 * torch.randn_like(z)
+        z = torch.nan_to_num(z, nan=0.0, posinf=5.0, neginf=-5.0)
+        z = torch.clamp(z, -5, 5)
+        #print(f"original z:\n {z}")
+        U, S, Vh = torch.linalg.svd(z)  # z: [batch_size, latent_dim]
+        Q = U[:, :self.num_clusters]  # [batch_size, num_clusters]
+
         # SVD for augmented view
-        U_aug, S_aug, V_aug = torch.linalg.svd(z_aug)
+        #print(f"original z_aug:\n {z_aug}")
+        z_aug = z_aug + 1e-6 * torch.randn_like(z_aug)        
+        z_aug = torch.nan_to_num(z_aug, nan=0.0, posinf=5.0, neginf=-5.0)
+        z_aug = torch.clamp(z_aug, -5, 5)
+        #print(f"stablized z_aug:\n {z_aug}")
+        U_aug, S_aug, Vh_aug = torch.linalg.svd(z_aug)
         Q_aug = U_aug[:, :self.num_clusters]
-        
+
         # Compute k-means loss
-        gram_matrix = torch.matmul(z.T, z)
-        gram_matrix_aug = torch.matmul(z_aug.T, z_aug)
-        km_org = torch.trace(gram_matrix) - torch.trace(torch.matmul(torch.matmul(Q.T, gram_matrix), Q))
-        km_aug = torch.trace(gram_matrix_aug) - torch.trace(torch.matmul(torch.matmul(Q_aug.T, gram_matrix_aug), Q_aug))
-        
+        gram_matrix = torch.matmul(z.T, z)           # [latent_dim, latent_dim]
+        gram_matrix_aug = torch.matmul(z_aug.T, z_aug)  # [latent_dim, latent_dim]
+
+        # Compute QTZQ = (z.T @ Q).T @ (z.T @ Q)
+        ZQ = torch.matmul(z.T, Q)        # [latent_dim, num_clusters]
+        QTZQ = torch.matmul(ZQ.T, ZQ)    # [num_clusters, latent_dim] @ [latent_dim, num_clusters] = [num_clusters, num_clusters]
+
+        ZQ_aug = torch.matmul(z_aug.T, Q_aug)
+        QTZQ_aug = torch.matmul(ZQ_aug.T, ZQ_aug)
+
+        km_org = torch.trace(gram_matrix) - torch.trace(QTZQ)
+        km_aug = torch.trace(gram_matrix_aug) - torch.trace(QTZQ_aug)
+
         return 0.5 * (km_org + km_aug), Q, Q_aug
     
     def compute_cluster_contrastive_loss(self, Q, Q_aug):

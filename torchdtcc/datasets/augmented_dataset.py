@@ -11,7 +11,11 @@ class AugmentedDataset(Dataset):
         return len(self.X)
 
     def __getitem__(self, idx):
-        return torch.tensor(self.X[idx]), torch.tensor(self.y[idx])
+        x = torch.tensor(self.X[idx])
+        if x.ndim == 1:
+            x = x.unsqueeze(-1)  # add feature dimension if only batch and seq_len provided
+        y = torch.tensor(self.y[idx])
+        return x, y
     
     @abstractmethod
     def augmentation(self, batch_x):

@@ -4,7 +4,7 @@ model:
   input_dim:  1
   num_layers:  3
   num_clusters: 3
-  hidden_dim:  [100, 50, 50]
+  hidden_dims:  [100, 50, 50]
   dilation_rates: [1, 4, 16]
   tau_I: 1.0
   tau_C: 1.0

@@ -21,13 +21,9 @@ class MeatArffDataset(AugmentedDataset):
 
     def augmentation(self, batch_x):        
         # Ensure [batch, seq_len, features]
-        if batch_x.ndim == 2:
-            batch_x = batch_x.unsqueeze(-1)  # add feature dim
+        assert batch_x.ndim == 3, f"Input must be 3D, got {batch_x.shape}"
         
         x_aug = torch_augmentation_wrapper(jitter, batch_x)
         # x_augx = torch_augmentation_wrapper(scaling, x_aug) # Import scaling first
 
-        # Remove feature dim if univariate
-        if x_aug.shape[-1] == 1:
-            x_aug = x_aug.squeeze(-1)
         return x_aug
