@@ -120,6 +120,12 @@ class DTCC(nn.Module):
             elif isinstance(m, nn.LayerNorm):
                 nn.init.ones_(m.weight)
                 nn.init.zeros_(m.bias)
+    
+    def get_num_clusters(self):
+        return self.num_clusters
+
+    def get_stable_svd(self):
+        return self.stable_svd
 
     def forward(self, x, x_aug):
         assert x.ndim == 3, f"Input must be 3D, got {x.shape}"

@@ -8,7 +8,7 @@ model:
   dilation_rates: [1, 4, 16]
   tau_I: 1.0
   tau_C: 1.0
-  stable_svd: true
+  stable_svd: false
 
 trainer:
   save_path: "dtcc_model.pth"

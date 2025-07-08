@@ -36,9 +36,7 @@ def load_model_clustering_example():
 
 def use_model_clustering_example(model):
     clusterer = Clusterer(config["device"])
-    num_clusters = model_cfg.get("num_clusters", 3)
-    stable_svd = model_cfg.get("stable_svd", False)
-    clusterer.set_model(model, num_clusters, stable_svd)
+    clusterer.set_model(model)
     return clusterer
 
 def run_training():    

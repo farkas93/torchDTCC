@@ -5,6 +5,7 @@ from torch.utils.data import DataLoader
 from tqdm import tqdm
 import logging
 from typing import Dict
+from .clustering import Clusterer
 from .dtcc import DTCC
 from torchdtcc.datasets.augmented_dataset import AugmentedDataset
 
@@ -21,13 +22,15 @@ class DTCCTrainer:
         device="cpu"
     ):
         self.model = model
+        self.device = device
+        self.clusterer = Clusterer(self.device)
         self.dataloader = dataloader
         self.augment_time_series = augment_time_series
         self.optimizer = optimizer
         self.lambda_cd = lambda_cd
         self.num_epochs = num_epochs
         self.update_interval = update_interval
-        self.device = device
+        self.eval_after_epochs = 10
 
     def run(self, save_path=None):
         self.model.train()
@@ -82,7 +85,11 @@ class DTCCTrainer:
             logging.info(
                 f"Epoch {epoch+1}/{self.num_epochs} | avg recon: {avg_recon:.4f} | avg instance: {avg_instance:.4f} | avg cd: {avg_cd:.4f} | avg cluster: {avg_cluster:.4f} | avg total: {avg_total:.4f}"
             )
-
+            if (epoch + 1) % self.eval_after_epochs == 0:
+                #TODO: use the clusterer to evaluate
+                self.clusterer.set_model(self.model)
+                metrics = self.clusterer.evaluate(self.dataloader)
+                logging.info(f"Epoch {epoch+1}: ACC={metrics['acc']:.4f} NMI={metrics['nmi']:.4f} ARI={metrics['ari']:.4f} RI={metrics['ri']:.4f}")
             if save_path is not None:
                 torch.save(self.model.state_dict(), save_path)
                 logging.info(f"Model saved to {save_path}")
