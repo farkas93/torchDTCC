@@ -89,7 +89,7 @@ class DTCCTrainer:
                 #TODO: use the clusterer to evaluate
                 self.clusterer.set_model(self.model)
                 metrics = self.clusterer.evaluate(self.dataloader)
-                logging.info(f"Epoch {epoch+1}: ACC={metrics['acc']:.4f} NMI={metrics['nmi']:.4f} ARI={metrics['ari']:.4f} RI={metrics['ri']:.4f}")
+                print(f"Epoch {epoch+1}: ACC={metrics['acc']:.4f} NMI={metrics['nmi']:.4f} ARI={metrics['ari']:.4f} RI={metrics['ri']:.4f}")
             if save_path is not None:
                 torch.save(self.model.state_dict(), save_path)
                 logging.info(f"Model saved to {save_path}")

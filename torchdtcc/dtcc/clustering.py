@@ -91,7 +91,7 @@ class Clusterer:
             predicted = predicted.cpu().numpy().reshape(-1)
         else:
             predicted = np.array(predicted).reshape(-1)
-        print(f"Shapes: {ground_truth.shape} vs {predicted.shape}")
+        logging.debug(f"Shapes: {ground_truth.shape} vs {predicted.shape}")
         assert ground_truth.shape == predicted.shape, f"Shape mismatch: {ground_truth.shape} vs {predicted.shape}"
 
         return all_metrics(ground_truth, predicted)
