@@ -30,7 +30,6 @@ class DTCCTrainer:
         self.lambda_cd = lambda_cd
         self.num_epochs = num_epochs
         self.update_interval = update_interval
-        self.eval_after_epochs = 10
 
     def run(self, save_path=None):
         self.model.train()
@@ -85,7 +84,7 @@ class DTCCTrainer:
             logging.info(
                 f"Epoch {epoch+1}/{self.num_epochs} | avg recon: {avg_recon:.4f} | avg instance: {avg_instance:.4f} | avg cd: {avg_cd:.4f} | avg cluster: {avg_cluster:.4f} | avg total: {avg_total:.4f}"
             )
-            if (epoch + 1) % self.eval_after_epochs == 0:
+            if (epoch + 1) % self.update_interval == 0:
                 #TODO: use the clusterer to evaluate
                 self.clusterer.set_model(self.model)
                 metrics = self.clusterer.evaluate(self.dataloader)
