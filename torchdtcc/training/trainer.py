@@ -5,20 +5,20 @@ from torch.utils.data import DataLoader
 from tqdm import tqdm
 import logging
 from typing import Dict
-from .clustering import Clusterer
-from .dtcc import DTCC
+from ..dtcc.clustering import Clusterer
+from ..dtcc.dtcc import DTCC
 from torchdtcc.datasets.augmented_dataset import AugmentedDataset
 
 class DTCCTrainer:
     def __init__(
-        self,
-        model : DTCC,
-        dataloader : DataLoader,
-        augment_time_series,
-        optimizer,
-        lambda_cd,
-        num_epochs,
-        update_interval=5,
+        self, 
+        model: DTCC, 
+        dataloader: DataLoader, 
+        augment_time_series, 
+        optimizer, 
+        lambda_cd, 
+        num_epochs, 
+        update_interval=5, 
         device="cpu"
     ):
         self.model = model
@@ -38,7 +38,7 @@ class DTCCTrainer:
             recon_losses, instance_losses, cd_losses, cluster_losses, total_losses = [], [], [], [], []
             with tqdm(total=len(self.dataloader), desc=f'Epoch {epoch+1}/{self.num_epochs}') as pbar:
                 for i, batch in enumerate(self.dataloader):
-                    x, y = batch  # Unpack features and targets
+                    x, y = batch
                     x = x.to(self.device)
                     x_aug = self.augment_time_series(x)
                     z, z_aug, x_recon, x_aug_recon = self.model(x, x_aug)
@@ -48,55 +48,51 @@ class DTCCTrainer:
                     cluster_loss = self.model.compute_cluster_contrastive_loss(Q, Q_aug)
                     loss = recon_loss + instance_loss + cluster_loss + self.lambda_cd * cd_loss
 
-                    # Track losses
                     recon_losses.append(recon_loss.item())
                     instance_losses.append(instance_loss.item())
                     cd_losses.append(cd_loss.item())
                     cluster_losses.append(cluster_loss.item())
                     total_losses.append(loss.item())
 
-                    # Logging
-                    logging.debug(
-                        f"Step {i} | recon: {recon_loss.item():.4f} | instance: {instance_loss.item():.4f} | cd: {cd_loss.item():.4f} | cluster: {cluster_loss.item():.4f} | total: {loss.item():.4f}"
-                    )
+                    logging.debug(f"Step {i} | recon: {recon_loss.item():.4f} | instance: {instance_loss.item():.4f} | cd: {cd_loss.item():.4f} | cluster: {cluster_loss.item():.4f} | total: {loss.item():.4f}")
 
                     self.optimizer.zero_grad()
                     loss.backward()
                     self.optimizer.step()
                     epoch_loss += loss.item()
 
-                    pbar.set_postfix({
-                        'recon': f"{recon_loss.item():.3f}",
-                        'inst': f"{instance_loss.item():.3f}",
-                        'cd': f"{cd_loss.item():.3f}",
-                        'clust': f"{cluster_loss.item():.3f}",
-                        'total': f"{loss.item():.3f}"
-                    })
+                    pbar.set_postfix({'recon': f"{recon_loss.item():.3f}", 'inst': f"{instance_loss.item():.3f}", 'cd': f"{cd_loss.item():.3f}", 'clust': f"{cluster_loss.item():.3f}", 'total': f"{loss.item():.3f}"})
                     pbar.update(1)
 
-            # Epoch averages
             avg_recon = sum(recon_losses) / len(recon_losses)
             avg_instance = sum(instance_losses) / len(instance_losses)
             avg_cd = sum(cd_losses) / len(cd_losses)
             avg_cluster = sum(cluster_losses) / len(cluster_losses)
             avg_total = sum(total_losses) / len(total_losses)
 
-            logging.info(
-                f"Epoch {epoch+1}/{self.num_epochs} | avg recon: {avg_recon:.4f} | avg instance: {avg_instance:.4f} | avg cd: {avg_cd:.4f} | avg cluster: {avg_cluster:.4f} | avg total: {avg_total:.4f}"
-            )
+            self.log_loss(epoch, avg_recon, avg_instance, avg_cd, avg_cluster, avg_total)
+
             if (epoch + 1) % self.update_interval == 0:
-                #TODO: use the clusterer to evaluate
                 self.clusterer.set_model(self.model)
                 metrics = self.clusterer.evaluate(self.dataloader)
-                print(f"Epoch {epoch+1}: ACC={metrics['acc']:.4f} NMI={metrics['nmi']:.4f} ARI={metrics['ari']:.4f} RI={metrics['ri']:.4f}")
-            if save_path is not None:
-                torch.save(self.model.state_dict(), save_path)
-                logging.info(f"Model saved to {save_path}")
+                self.log_evaluation(epoch, metrics)  # Fixed method name
 
+        self.save_model(save_path)  # Moved outside loop to save only final model
         return self.model
 
+    def log_loss(self, epoch, avg_recon, avg_instance, avg_cd, avg_cluster, avg_total):
+        logging.info(f"Epoch {epoch+1}/{self.num_epochs} | avg recon: {avg_recon:.4f} | avg instance: {avg_instance:.4f} | avg cd: {avg_cd:.4f} | avg cluster: {avg_cluster:.4f} | avg total: {avg_total:.4f}")
+
+    def log_evaluation(self, epoch, metrics):  # Fixed method name
+        print(f"Epoch {epoch+1}: ACC={metrics['acc']:.4f} NMI={metrics['nmi']:.4f} ARI={metrics['ari']:.4f} RI={metrics['ri']:.4f}")
+
+    def save_model(self, save_path):
+        if save_path is not None:
+            torch.save(self.model.state_dict(), save_path)
+            logging.info(f"Model saved to {save_path}")
+
     @staticmethod
-    def from_config(config: Dict, dataset: AugmentedDataset):
+    def _setup_model_environment(config: Dict, dataset: AugmentedDataset):
         model_cfg = config["model"]
         data_cfg = config["data"]
         trainer_cfg = config.get("trainer", {})
@@ -120,14 +116,25 @@ class DTCCTrainer:
             lr=trainer_cfg.get("learning_rate", 1e-3),
             weight_decay=trainer_cfg.get("weight_decay", 0)
         )
+        return {
+            "dataloader": dataloader,
+            "model": model,
+            "optimizer": optimizer,
+            "device": device
+        }
+
+    @staticmethod
+    def from_config(config: Dict, dataset: AugmentedDataset):
+        trainer_cfg = config.get("trainer", {})
+        env = DTCCTrainer.setup_model_environment(config, dataset)
 
         return DTCCTrainer(
-            model=model,
-            dataloader=dataloader,
+            model=env["model"],
+            dataloader=env["dataloader"],
             augment_time_series=dataset.augmentation,
-            optimizer=optimizer,
+            optimizer=env["optimizer"],
             lambda_cd=trainer_cfg.get("lambda_cd", 1.0),
             num_epochs=trainer_cfg.get("num_epochs", 100),
             update_interval=trainer_cfg.get("update_interval", 5),
-            device=device
+            device=env["device"]
         )

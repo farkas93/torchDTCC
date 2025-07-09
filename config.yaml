@@ -17,6 +17,9 @@ trainer:
   lambda_cd: 0.001
   num_epochs: 200
   update_interval: 5
+  mlflow:
+    experiment: 'my_experiment'
+    run: 'my_run_1'
 
 data:
   dataset_class: "torchdtcc.datasets.meat.MeatArffDataset"

@@ -1,8 +1,10 @@
 import yaml
-from torchdtcc.dtcc.trainer import DTCCTrainer
+from torchdtcc.training.trainer import DTCCTrainer
+from torchdtcc.training.mlflow import MlFlowDTCCTrainer
 from torchdtcc.dtcc.clustering import Clusterer
 from torch.utils.data import DataLoader
 from torchdtcc.datasets.meat.arff_meat import MeatArffDataset
+from torchdtcc.training.hyperparam_search import HyperparameterSearch
 
 import logging
 
@@ -43,6 +45,15 @@ def run_training():
     trainer = DTCCTrainer.from_config(config, dataset)
     save_path = config.get("trainer", {}).get("save_path", "")
     return trainer.run(save_path=save_path)
+
+def hyperparam_search():
+    tauIs = []
+    tauCs = []
+    hps = HyperparameterSearch(config, dataset, tauIs, tauCs, MlFlowDTCCTrainer.from_config)
+    grid = hps.grid_search()
+    metric = "nmi"
+    best = hps.get_best_params(metric=metric)
+    print(f"Best scoring {metric}: {best}")
 
 if __name__ == "__main__":
     model = run_training()

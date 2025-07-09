@@ -4,7 +4,7 @@ import logging
 from sklearn.cluster import KMeans
 from .dtcc import DTCC
 from .helper import stablize
-from .metrics import all_metrics
+from ..training.metrics import all_metrics
 
 class Clusterer:
     def __init__(self, device):
@@ -36,7 +36,6 @@ class Clusterer:
         self.model.eval()
         self.num_clusters = model_kwargs.get("num_clusters", 3)
         self.stable_svd = model_kwargs.get("stable_svd", False)
-
 
     def encode(self, dataloader):
         zs = []
