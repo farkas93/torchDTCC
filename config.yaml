@@ -18,7 +18,8 @@ trainer:
   num_epochs: 200
   update_interval: 5
   mlflow:
-    experiment: 'my_experiment'
+    # databricks example. databricks requires this scheme for experiment name
+    experiment: "/Users/first.last@companydomain.com/my_experiment_name"
     run: 'my_run_1'
 
 data:
