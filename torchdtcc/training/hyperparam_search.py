@@ -34,6 +34,7 @@ class HyperparameterSearch:
             config = deepcopy(self.base_config)
             config["model"]["tau_I"] = tau_I
             config["model"]["tau_C"] = tau_C
+            config["trainer"]["mlflow"]["run"] += f"_tau_I_{tau_I}_tau_C_{tau_C}"
 
             # Initialize trainer
             trainer = self.trainer_factory(config, self.dataset)
