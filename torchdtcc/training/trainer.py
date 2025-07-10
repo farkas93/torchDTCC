@@ -19,6 +19,7 @@ class DTCCTrainer:
         lambda_cd, 
         num_epochs, 
         update_interval=5, 
+        gradient_clip = None,
         device="cpu"
     ):
         self.model = model
@@ -30,6 +31,7 @@ class DTCCTrainer:
         self.lambda_cd = lambda_cd
         self.num_epochs = num_epochs
         self.update_interval = update_interval
+        self.grad_clip_max = gradient_clip
 
     def run(self, save_path=None):
         self.model.train()
@@ -64,7 +66,8 @@ class DTCCTrainer:
                             if param.grad is not None:
                                 if torch.isnan(param.grad).any() or torch.isinf(param.grad).any():
                                     pbar.write(f"Exploding gradients detected at step {i}, epoch {epoch+1}!")
-                                    torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
+                                    if self.grad_clip_max:
+                                        torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=self.grad_clip_max)
                         self.optimizer.step()
                         epoch_loss += loss.item()
 
@@ -124,7 +127,7 @@ class DTCCTrainer:
         optimizer = optim.Adam(
             model.parameters(),
             lr=trainer_cfg.get("learning_rate", 1e-3),
-            weight_decay=trainer_cfg.get("weight_decay", 0)
+            weight_decay=float(trainer_cfg.get("weight_decay", 0))
         )
         return {
             "dataloader": dataloader,
@@ -146,5 +149,6 @@ class DTCCTrainer:
             lambda_cd=trainer_cfg.get("lambda_cd", 1.0),
             num_epochs=trainer_cfg.get("num_epochs", 100),
             update_interval=trainer_cfg.get("update_interval", 5),
+            gradient_clip=trainer_cfg.get("gradient_clip", None),
             device=env["device"]
         )

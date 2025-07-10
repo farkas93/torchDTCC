@@ -21,11 +21,12 @@ class MlFlowDTCCTrainer(DTCCTrainer):
         lambda_cd,
         num_epochs,
         update_interval=5,
+        gradient_clip = None,
         device="cpu",
         experiment_name: str = "MLflow_DTCC_Training",
         run_name: str = "default_run"
     ):
-        super().__init__(model, dataloader, augment_time_series, optimizer, lambda_cd, num_epochs, update_interval, device)
+        super().__init__(model, dataloader, augment_time_series, optimizer, lambda_cd, num_epochs, update_interval, gradient_clip, device)
         self.experiment_name = experiment_name
         self.run_name = run_name
         mlflow.set_experiment(experiment_name)
@@ -83,6 +84,7 @@ class MlFlowDTCCTrainer(DTCCTrainer):
             lambda_cd=trainer_cfg.get("lambda_cd", 1.0),
             num_epochs=trainer_cfg.get("num_epochs", 100),
             update_interval=trainer_cfg.get("update_interval", 5),
+            gradient_clip=trainer_cfg.get("gradient_clip", None),
             device=env["device"],
             experiment_name=mlflow_cfg.get("experiment", "MLflow_DTCC_Training"),
             run_name=mlflow_cfg.get("run", "default_run")
