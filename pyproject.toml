@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "torchdtcc"
-version = "0.0.6"
+version = "0.0.7"
 description = "Deep Temporal Contrastive Clustering for time series"
 authors = [
   { name="Zsombor Kalotay", email="zsombor.kalotay@gmail.ch" }
