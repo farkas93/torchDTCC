@@ -37,36 +37,42 @@ class DTCCTrainer:
             epoch_loss = 0
             recon_losses, instance_losses, cd_losses, cluster_losses, total_losses = [], [], [], [], []
             with tqdm(total=len(self.dataloader), desc=f'Epoch {epoch+1}/{self.num_epochs}') as pbar:
-                for i, batch in enumerate(self.dataloader):
-                    x, y = batch
-                    x = x.to(self.device)
-                    x_aug = self.augment_time_series(x)
-                    z, z_aug, x_recon, x_aug_recon = self.model(x, x_aug)
-                    recon_loss = self.model.compute_reconstruction_loss(x, x_recon, x_aug, x_aug_recon)
-                    instance_loss = self.model.compute_instance_contrastive_loss(z, z_aug)
-                    cd_loss, Q, Q_aug = self.model.compute_cluster_distribution_loss(z, z_aug)
-                    cluster_loss = self.model.compute_cluster_contrastive_loss(Q, Q_aug)
-                    loss = recon_loss + instance_loss + cluster_loss + self.lambda_cd * cd_loss
+            
+                try:
+                    for i, batch in enumerate(self.dataloader):
+                        x, y = batch
+                        x = x.to(self.device)
+                        x_aug = self.augment_time_series(x)
+                        z, z_aug, x_recon, x_aug_recon = self.model(x, x_aug)
+                        recon_loss = self.model.compute_reconstruction_loss(x, x_recon, x_aug, x_aug_recon)
+                        instance_loss = self.model.compute_instance_contrastive_loss(z, z_aug)
+                        cd_loss, Q, Q_aug = self.model.compute_cluster_distribution_loss(z, z_aug)
+                        cluster_loss = self.model.compute_cluster_contrastive_loss(Q, Q_aug)
+                        loss = recon_loss + instance_loss + cluster_loss + self.lambda_cd * cd_loss
 
-                    recon_losses.append(recon_loss.item())
-                    instance_losses.append(instance_loss.item())
-                    cd_losses.append(cd_loss.item())
-                    cluster_losses.append(cluster_loss.item())
-                    total_losses.append(loss.item())
+                        recon_losses.append(recon_loss.item())
+                        instance_losses.append(instance_loss.item())
+                        cd_losses.append(cd_loss.item())
+                        cluster_losses.append(cluster_loss.item())
+                        total_losses.append(loss.item())
 
-                    logging.debug(f"Step {i} | recon: {recon_loss.item():.4f} | instance: {instance_loss.item():.4f} | cd: {cd_loss.item():.4f} | cluster: {cluster_loss.item():.4f} | total: {loss.item():.4f}")
+                        logging.debug(f"Step {i} | recon: {recon_loss.item():.4f} | instance: {instance_loss.item():.4f} | cd: {cd_loss.item():.4f} | cluster: {cluster_loss.item():.4f} | total: {loss.item():.4f}")
 
-                    self.optimizer.zero_grad()
-                    loss.backward()
-                    for param in self.model.parameters():
-                        if param.grad is not None:
-                            if torch.isnan(param.grad).any() or torch.isinf(param.grad).any():
-                                print("Exploding gradients detected!")
-                    self.optimizer.step()
-                    epoch_loss += loss.item()
+                        self.optimizer.zero_grad()
+                        loss.backward()
+                        for param in self.model.parameters():
+                            if param.grad is not None:
+                                if torch.isnan(param.grad).any() or torch.isinf(param.grad).any():
+                                    pbar.write(f"Exploding gradients detected at step {i}, epoch {epoch+1}!")
+                                    torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
+                        self.optimizer.step()
+                        epoch_loss += loss.item()
 
-                    pbar.set_postfix({'recon': f"{recon_loss.item():.3f}", 'inst': f"{instance_loss.item():.3f}", 'cd': f"{cd_loss.item():.3f}", 'clust': f"{cluster_loss.item():.3f}", 'total': f"{loss.item():.3f}"})
-                    pbar.update(1)
+                        pbar.set_postfix({'recon': f"{recon_loss.item():.3f}", 'inst': f"{instance_loss.item():.3f}", 'cd': f"{cd_loss.item():.3f}", 'clust': f"{cluster_loss.item():.3f}", 'total': f"{loss.item():.3f}"})
+                        pbar.update(1)
+                except Exception as e:
+                    pbar.write(f"Error: {e}")
+                    raise
 
             avg_recon = sum(recon_losses) / len(recon_losses)
             avg_instance = sum(instance_losses) / len(instance_losses)
