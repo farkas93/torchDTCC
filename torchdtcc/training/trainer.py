@@ -58,6 +58,10 @@ class DTCCTrainer:
 
                     self.optimizer.zero_grad()
                     loss.backward()
+                    for param in self.model.parameters():
+                        if param.grad is not None:
+                            if torch.isnan(param.grad).any() or torch.isinf(param.grad).any():
+                                print("Exploding gradients detected!")
                     self.optimizer.step()
                     epoch_loss += loss.item()
 
