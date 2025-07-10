@@ -6,16 +6,16 @@ model:
   num_clusters: 3
   hidden_dims:  [100, 50, 50]
   dilation_rates: [1, 4, 16]
-  tau_I: 1.0
-  tau_C: 1.0
+  tau_I: 0.4
+  tau_C: 0.6
   stable_svd: false
 
 trainer:
-  save_path: "dtcc_model.pth"
+  save_path: "dtcc_model_{}.pth"
   learning_rate: 0.005
   weight_decay: 0
-  lambda_cd: 0.001
-  num_epochs: 200
+  lambda_cd: 0.01
+  num_epochs: 500
   update_interval: 5
   mlflow:
     # databricks example. databricks requires this scheme for experiment name

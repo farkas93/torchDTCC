@@ -24,7 +24,7 @@ class HyperparameterSearch:
         self.results = []
         self.trainer_factory = trainer_factory
 
-    def grid_search(self) -> List[Dict]:
+    def grid_search(self, metric: str = "acc") -> List[Dict]:
         param_combinations = list(itertools.product(self.tau_I_values, self.tau_C_values))
         logging.info(f"Starting grid search over {len(param_combinations)} combinations of tau_I and tau_C")
 
@@ -58,7 +58,7 @@ class HyperparameterSearch:
             self.results.append(result)
             logging.info(f"Results for tau_I={tau_I}, tau_C={tau_C}: ACC={metrics['acc']:.4f}, NMI={metrics['nmi']:.4f}")
 
-        return self.results
+        return self.get_best_params(metric)
 
     def get_best_params(self, metric: str = "acc") -> Dict:
         if not self.results:

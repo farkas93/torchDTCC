@@ -5,3 +5,5 @@ scikit-learn
 tqdm
 pyyaml
 scipy
+pandas
+mlflow
