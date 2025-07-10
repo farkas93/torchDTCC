@@ -66,8 +66,10 @@ class DTCCTrainer:
                             if param.grad is not None:
                                 if torch.isnan(param.grad).any() or torch.isinf(param.grad).any():
                                     pbar.write(f"Exploding gradients detected at step {i}, epoch {epoch+1}!")
-                                    if self.grad_clip_max:
-                                        torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=self.grad_clip_max)
+                                    torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=self.grad_clip_max)
+
+                        if self.grad_clip_max:
+                            torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=self.grad_clip_max)
                         self.optimizer.step()
                         epoch_loss += loss.item()
 

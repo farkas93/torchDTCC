@@ -3,7 +3,7 @@ from torchdtcc.training.trainer import DTCCTrainer
 from torchdtcc.training.mlflow import MlFlowDTCCTrainer
 from torchdtcc.dtcc.clustering import Clusterer
 from torch.utils.data import DataLoader
-from torchdtcc.datasets.meat.arff_plane import PlaneArffDataset
+from torchdtcc.datasets.test.toy import ToyAugmentedDataset
 from torchdtcc.training.hyperparam_search import HyperparameterSearch
 
 import logging
@@ -20,7 +20,7 @@ with open("config.yaml", "r") as f:
 
 # Prepare dataset and dataloader
 data_cfg = config.get("data", {})
-dataset = PlaneArffDataset(path=data_cfg['path'], normalize=data_cfg['normalize'])
+dataset = ToyAugmentedDataset(path=data_cfg['path'], normalize=data_cfg['normalize'])
 
 model_cfg = config.get("model", {})
 logging.info(f"STABLE SVD: {model_cfg['stable_svd']}")
