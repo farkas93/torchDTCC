@@ -20,7 +20,7 @@ with open("config.yaml", "r") as f:
 
 # Prepare dataset and dataloader
 data_cfg = config.get("data", {})
-dataset = MeatArffDataset(path=data_cfg['dataset_args']['files_path'])
+dataset = MeatArffDataset(path=data_cfg['path'])
 
 model_cfg = config.get("model", {})
 logging.info(f"STABLE SVD: {model_cfg['stable_svd']}")

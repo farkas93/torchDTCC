@@ -136,7 +136,7 @@ class DTCCTrainer:
     @staticmethod
     def from_config(config: Dict, dataset: AugmentedDataset):
         trainer_cfg = config.get("trainer", {})
-        env = DTCCTrainer.setup_model_environment(config, dataset)
+        env = DTCCTrainer._setup_model_environment(config, dataset)
 
         return DTCCTrainer(
             model=env["model"],

@@ -144,38 +144,6 @@ class DTCC(nn.Module):
         recon_aug = torch.mean((x_aug - x_aug_recon) ** 2)
         return recon_org + recon_aug
     
-    def compute_instance_contrastive_loss(self, z, z_aug):
-        n = z.size(0)
-        z_norm = nn.functional.normalize(z, dim=1)
-        z_aug_norm = nn.functional.normalize(z_aug, dim=1)
-        
-        # z -> z_aug
-        sim_matrix = torch.matmul(z_norm, z_aug_norm.T) / self.tau_I
-        max_sim_mat = sim_matrix.max(dim=1, keepdim=True)[0]
-        sim_matrix = sim_matrix - max_sim_mat  # shift for stability
-
-        positives = torch.diag(sim_matrix)
-        exp_sim = torch.exp(sim_matrix)
-        mask = torch.eye(n, device=z.device)
-        neg_mask = 1 - mask
-        
-        # denominator: all except the positive
-        denominator = torch.sum(exp_sim * neg_mask, dim=1) + torch.exp(positives)
-        # Correct: log(exp(x)/y) = x - log(y)
-        instance_loss = -torch.mean(positives - torch.log(denominator + EPS))
-        
-        # z_aug -> z
-        sim_matrix_aug = torch.matmul(z_aug_norm, z_norm.T) / self.tau_I
-        max_sim_mat_aug = sim_matrix_aug.max(dim=1, keepdim=True)[0]
-        sim_matrix_aug = sim_matrix_aug - max_sim_mat_aug
-
-        positives_aug = torch.diag(sim_matrix_aug)
-        exp_sim_aug = torch.exp(sim_matrix_aug)
-        denominator_aug = torch.sum(exp_sim_aug * neg_mask, dim=1) + torch.exp(positives_aug)
-        instance_loss_aug = -torch.mean(positives_aug - torch.log(denominator_aug + EPS))
-        
-        return 0.5 * (instance_loss + instance_loss_aug) 
-    
     def compute_cluster_distribution_loss(self, z, z_aug):
         assert not torch.isnan(z).any(), "NaN in z before SVD"
         assert not torch.isinf(z).any(), "Inf in z before SVD"
@@ -200,45 +168,71 @@ class DTCC(nn.Module):
         U_aug, S_aug, V_aug = torch.linalg.svd(z_aug)
         Q_aug = U_aug[:, :self.num_clusters]
         assert not torch.isnan(Q_aug).any(), "NaN in Q_aug after SVD"
+        
+        # If one does not transpose z, you don't have the dimensionalities described in the paper and the math
+        # does not work.
+        z = z.T
+        z_aug = z_aug.T
 
         # Compute k-means loss
-        gram_matrix = torch.matmul(z.T, z)           # [latent_dim, latent_dim]
-        gram_matrix_aug = torch.matmul(z_aug.T, z_aug)  # [latent_dim, latent_dim]
+        gram_matrix = torch.matmul(z.T, z)           # [batch_size, batch_size]
+        gram_matrix_aug = torch.matmul(z_aug.T, z_aug)  # [batch_size, batch_size]
 
         # Compute QTZQ = (z.T @ Q).T @ (z.T @ Q)
-        ZQ = torch.matmul(z.T, Q)        # [latent_dim, num_clusters]
-        QTZQ = torch.matmul(ZQ.T, ZQ)    # [num_clusters, latent_dim] @ [latent_dim, num_clusters] = [num_clusters, num_clusters]
+        ZQ = torch.matmul(z, Q)        # [latent_dim, num_clusters]
+        QZTZQ = torch.matmul(ZQ.T, ZQ)    # [num_clusters, latent_dim] @ [latent_dim, num_clusters] = [num_clusters, num_clusters]
 
-        ZQ_aug = torch.matmul(z_aug.T, Q_aug)
-        QTZQ_aug = torch.matmul(ZQ_aug.T, ZQ_aug)
+        ZQ_aug = torch.matmul(z_aug, Q_aug)
+        QZTZQ_aug = torch.matmul(ZQ_aug.T, ZQ_aug)
 
-        km_org = torch.trace(gram_matrix) - torch.trace(QTZQ)
-        km_aug = torch.trace(gram_matrix_aug) - torch.trace(QTZQ_aug)
+        km_org = torch.trace(gram_matrix) - torch.trace(QZTZQ)
+        km_aug = torch.trace(gram_matrix_aug) - torch.trace(QZTZQ_aug)
 
-        return 0.5 * (km_org + km_aug), Q, Q_aug
+        return (0.5 * (km_org + km_aug)), Q, Q_aug
     
-    def compute_cluster_contrastive_loss(self, Q, Q_aug):
-        logging.debug("Q:\n{}".format(Q))
-        logging.debug("Q_aug:\n{}".format(Q_aug))
-        k = Q.size(1)
-        
-        # Normalize Q and Q_aug
-        Q_norm = nn.functional.normalize(Q, dim=0)
-        Q_aug_norm = nn.functional.normalize(Q_aug, dim=0)
+    def augmented_contrastive_loss(self, orig, aug, temperature, mask_dim, norm_dim=0):
+        # normalize matrices for similarity computation
+        orig_norm = nn.functional.normalize(orig, dim=norm_dim) #[latent_space, batch_size]
+        aug_norm = nn.functional.normalize(aug, dim=norm_dim) #[latent_space, batch_size]
         
         # Compute similarity matrix
-        sim_matrix = torch.matmul(Q_norm.T, Q_aug_norm) / self.tau_C
-        
+        sim_matrix = torch.matmul(orig_norm.T, aug_norm) / temperature # [batch_size, batch_size]
         # Positive pairs are on the diagonal
-        positives = torch.diag(sim_matrix)
+        positives = torch.exp(torch.diag(sim_matrix)) # [batch_size, batch_size]
         
-        # For each q_i, compute denominator
-        exp_sim = torch.exp(sim_matrix)
-        mask = torch.eye(k, device=Q.device)
+        # some weird term exp(sim(q_i,q_j)/temp) of which i can't wrap my head around. 
+        # It should not contain the augmented ones since it has no superscrpit?
+        # is that a typo?
+        self_sim = torch.matmul(orig.T, orig) / temperature
+        self_positives = torch.exp(self_sim) # [batch_size, batch_size]
+        # compute denominator
+        exp_sim = torch.exp(sim_matrix) # [batch_size, batch_size]
+        mask = torch.eye(mask_dim, device=orig.device) # [batch_size, batch_size]
         neg_mask = 1 - mask
         
-        denominator = torch.sum(exp_sim * neg_mask, dim=1) + torch.exp(positives)
-        cluster_loss = -torch.mean(torch.log(torch.exp(positives) / (denominator+EPS) + EPS))
+        denominator = torch.sum(positives + exp_sim * neg_mask, dim=1)
+        return -torch.log(positives / denominator)
+
+    
+    def compute_instance_contrastive_loss(self, z, z_aug):
+        # make it [latent_space, batch_size] as defined in paper
+        z = z.T 
+        z_aug = z_aug.T
+        n = z.size(1) # batch_size
+
+        loss_q = self.augmented_contrastive_loss(z, z_aug, self.tau_I, n)
+        loss_q_aug = self.augmented_contrastive_loss(z_aug, z, self.tau_I, n)
+        scalar = 1.0 / (2*n)
+        return scalar * (torch.sum(loss_q) + torch.sum(loss_q_aug))
+        
+    def compute_cluster_contrastive_loss(self, Q, Q_aug):
+        # Q in [batch_size, num_clusters] -> k = num_clusters
+        k = Q.size(1) 
+        
+        loss_q = self.augmented_contrastive_loss(Q, Q_aug, self.tau_C, k)
+        loss_q_aug = self.augmented_contrastive_loss(Q_aug, Q, self.tau_C, k)
+        scalar = 1.0 / (2*k)
+        contrastive_loss = scalar * (torch.sum(loss_q) + torch.sum(loss_q_aug))
         
         # Compute entropy term
         P_q = torch.mean(Q, dim=0)
@@ -247,8 +241,7 @@ class DTCC(nn.Module):
         # Apply clamp for numerical stability
         P_q = torch.clamp(P_q, min=EPS)
         P_q_aug = torch.clamp(P_q_aug, min=EPS)
-        logging.debug("P_q:\n{}".format(P_q))
-        logging.debug("P_q_aug:\n{}".format(P_q_aug))
-        entropy = -torch.sum(P_q * torch.log(P_q)) - torch.sum(P_q_aug * torch.log(P_q_aug))
+        entropy = torch.sum(P_q * torch.log(P_q)) + torch.sum(P_q_aug * torch.log(P_q_aug))
         
-        return cluster_loss - entropy
+        # Dirty hack to keep the loss positive
+        return (contrastive_loss + entropy)
