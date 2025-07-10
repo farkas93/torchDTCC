@@ -1,11 +1,12 @@
 from scipy.io import arff
 import pandas as pd
-from torchdtcc.augmentations.basic import jitter
+import torch
+from torchdtcc.augmentations.basic import jitter, scaling, time_warp, window_slice
 from torchdtcc.augmentations.helper import torch_augmentation_wrapper
 from ..augmented_dataset import AugmentedDataset
 
 class PlaneArffDataset(AugmentedDataset):
-    def __init__(self, path):
+    def __init__(self, path, normalize: bool = True):
         data_train, _ = arff.loadarff(path + 'Plane_TRAIN.arff')
         data_test, _ = arff.loadarff(path + 'Plane_TEST.arff')
         df_train = pd.DataFrame(data_train)
@@ -17,13 +18,22 @@ class PlaneArffDataset(AugmentedDataset):
         target_col = 'target'
         # Ensure target is int
         df[target_col] = df[target_col].astype(int)
-        super().__init__(df, feature_cols, target_col)
+        super().__init__(df, feature_cols, target_col, normalize)
 
     def augmentation(self, batch_x):        
         # Ensure [batch, seq_len, features]
         assert batch_x.ndim == 3, f"Input must be 3D, got {batch_x.shape}"
         
-        x_aug = torch_augmentation_wrapper(jitter, batch_x)
-        # x_augx = torch_augmentation_wrapper(scaling, x_aug) # Import scaling first
-
+        augmentations = [jitter, scaling, time_warp, window_slice]
+        x_aug = batch_x
+        applied = False
+        
+        # Shuffle augmentations to randomize order
+        import random
+        random.shuffle(augmentations)
+        
+        for aug in augmentations:
+            if not applied or torch.rand(1).item() > 0.5:  # Apply first augmentation, then 50% chance for others
+                x_aug = torch_augmentation_wrapper(aug, x_aug)
+                applied = True
         return x_aug

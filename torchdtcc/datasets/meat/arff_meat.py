@@ -6,7 +6,7 @@ from torchdtcc.augmentations.helper import torch_augmentation_wrapper
 from ..augmented_dataset import AugmentedDataset
 
 class MeatArffDataset(AugmentedDataset):
-    def __init__(self, path):
+    def __init__(self, path, normalize: bool = True):
         data_train, _ = arff.loadarff(path + 'Meat_TRAIN.arff')
         data_test, _ = arff.loadarff(path + 'Meat_TEST.arff')
         df_train = pd.DataFrame(data_train)
@@ -18,7 +18,7 @@ class MeatArffDataset(AugmentedDataset):
         target_col = 'target'
         # Ensure target is int
         df[target_col] = df[target_col].astype(int)
-        super().__init__(df, feature_cols, target_col)
+        super().__init__(df, feature_cols, target_col, normalize)
 
     def augmentation(self, batch_x):        
         # Ensure [batch, seq_len, features]

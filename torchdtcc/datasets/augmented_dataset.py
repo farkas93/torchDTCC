@@ -4,11 +4,12 @@ from abc import abstractmethod
 import numpy as np # <-- Add this import
 
 class AugmentedDataset(Dataset):
-    def __init__(self, dataframe, feature_cols, target_col):
+    def __init__(self, dataframe, feature_cols, target_col, normalize: bool = False):
         # Original data loading
         self.X_raw = dataframe[feature_cols].values.astype('float32')
         self.y = dataframe[target_col].astype('int64').values
 
+        self.normalize = normalize
         # --- NEW: Compute normalization parameters and normalize data ---
         # Assuming X_raw is [num_samples, seq_len] or [num_samples, seq_len, features]
         # For univariate (like your Meat dataset), it's [num_samples, seq_len]
@@ -30,11 +31,17 @@ class AugmentedDataset(Dataset):
         # --- END NEW ---
 
     def __len__(self):
-        return len(self.X_normalized) # Use the normalized data's length
+        if (self.normalize):
+            return len(self.X_normalized)
+        else:
+            return len(self.X_raw)
 
     def __getitem__(self, idx):
         # Return the normalized data
-        x = torch.tensor(self.X_normalized[idx])
+        if self.normalize:
+            x = torch.tensor(self.X_normalized[idx])
+        else:
+            x = torch.tensor(self.X_raw[idx])
         if x.ndim == 1:
             x = x.unsqueeze(-1)  # add feature dimension if only batch and seq_len provided
         y = torch.tensor(self.y[idx])
