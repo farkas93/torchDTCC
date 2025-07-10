@@ -46,15 +46,17 @@ class DTCCTrainer:
                         x = x.to(self.device)
                         x_aug = self.augment_time_series(x)
                         z, z_aug, x_recon, x_aug_recon = self.model(x, x_aug)
+                        cd_loss, Q, Q_aug, debug_dict = self.model.compute_cluster_distribution_loss(z, z_aug)
+                        cd_loss = torch.tensor(0.0)
                         recon_loss = self.model.compute_reconstruction_loss(x, x_recon, x_aug, x_aug_recon)
-                        instance_loss = self.model.compute_instance_contrastive_loss(z, z_aug)
-                        cd_loss, Q, Q_aug = self.model.compute_cluster_distribution_loss(z, z_aug)
-                        cluster_loss = self.model.compute_cluster_contrastive_loss(Q, Q_aug)
+                        instance_loss = torch.tensor(0.0) #self.model.compute_instance_contrastive_loss(z, z_aug)
+                        cluster_loss = torch.tensor(0.0) #self.model.compute_cluster_contrastive_loss(Q, Q_aug)
                         loss = recon_loss + instance_loss + cluster_loss + self.lambda_cd * cd_loss
 
+                        self.debug_svd(epoch, Q, debug_dict)
                         recon_losses.append(recon_loss.item())
-                        instance_losses.append(instance_loss.item())
                         cd_losses.append(cd_loss.item())
+                        instance_losses.append(instance_loss.item())
                         cluster_losses.append(cluster_loss.item())
                         total_losses.append(loss.item())
 
@@ -94,6 +96,9 @@ class DTCCTrainer:
 
         self.save_model(save_path)  # Moved outside loop to save only final model
         return self.model
+
+    def debug_svd(self, epoch, Q, svds):
+        pass
 
     def log_loss(self, epoch, avg_recon, avg_instance, avg_cd, avg_cluster, avg_total):
         logging.info(f"Epoch {epoch+1}/{self.num_epochs} | avg recon: {avg_recon:.4f} | avg instance: {avg_instance:.4f} | avg cd: {avg_cd:.4f} | avg cluster: {avg_cluster:.4f} | avg total: {avg_total:.4f}")

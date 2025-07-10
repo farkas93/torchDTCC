@@ -141,7 +141,7 @@ class DTCC(nn.Module):
         km_org = torch.trace(gram_matrix) - torch.trace(QZTZQ)
         km_aug = torch.trace(gram_matrix_aug) - torch.trace(QZTZQ_aug)
 
-        return (0.5 * (km_org + km_aug)), Q, Q_aug
+        return (0.5 * (km_org + km_aug)), Q, Q_aug, {"U": U, "S": S, "V": V, "U_aug": U_aug, "S_aug": S_aug, "V_aug": V_aug}
     
     def _calculate_info_nce_loss(self, query_features_matrix, positive_features_matrix, all_features_view1, all_features_view2, temperature):
         """

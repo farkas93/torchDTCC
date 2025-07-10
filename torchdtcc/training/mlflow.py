@@ -10,6 +10,10 @@ from torchdtcc.dtcc.dtcc import DTCC
 from torchdtcc.dtcc.clustering import Clusterer
 from torchdtcc.datasets.augmented_dataset import AugmentedDataset
 from .trainer import DTCCTrainer
+from sklearn.manifold import TSNE
+import matplotlib.pyplot as plt
+import io
+import numpy as np
 
 class MlFlowDTCCTrainer(DTCCTrainer):
     def __init__(
@@ -43,6 +47,21 @@ class MlFlowDTCCTrainer(DTCCTrainer):
             result = super().run(save_path)
         return result
     
+    def debug_svd(self, epoch, Q, svds):
+        if hasattr(self.model, 'compute_cluster_distribution_loss'):
+            # After calling compute_cluster_distribution_loss(z, z_aug)
+            with torch.no_grad():
+                Q_hist = torch.argmax(Q, dim=1).cpu().numpy()
+                hist, _ = np.histogram(Q_hist, bins=np.arange(self.model.get_num_clusters() + 1))
+                for i, count in enumerate(hist):
+                    mlflow.log_metric(f"cluster_count_{i}", int(count), step=epoch+1)
+        with torch.no_grad():
+            for i, s in enumerate(svds['S'].cpu().numpy()):
+                mlflow.log_metric(f"svd_singular_{i}", float(s), step=epoch+1)
+            for i, s in enumerate(svds['S_aug'].cpu().numpy()):
+                mlflow.log_metric(f"svd_singular_{i}", float(s), step=epoch+1)
+
+
     def log_loss(self, epoch, avg_recon, avg_instance, avg_cd, avg_cluster, avg_total):
         # Log epoch metrics to MLflow
         mlflow.log_metric("avg_recon_loss", avg_recon, step=epoch + 1)
@@ -62,6 +81,29 @@ class MlFlowDTCCTrainer(DTCCTrainer):
         mlflow.log_metric("ARI", metrics['ari'], step=epoch + 1)
         mlflow.log_metric("RI", metrics['ri'], step=epoch + 1)
         print(f"Epoch {epoch+1}: ACC={metrics['acc']:.4f} NMI={metrics['nmi']:.4f} ARI={metrics['ari']:.4f} RI={metrics['ri']:.4f}")
+        self.create_tsne_plot(epoch)
+    
+    def create_tsne_plot(self, epoch):
+        if epoch % 10 == 0:
+            all_z, all_y = [], []
+            for x, y in self.dataloader:
+                x = x.to(self.device)
+                z = self.model.encoder(x)
+                all_z.append(z.detach().cpu().numpy())
+                all_y.append(y.cpu().numpy())
+            all_z = np.concatenate(all_z, axis=0)
+            all_y = np.concatenate(all_y, axis=0)
+
+            # t-SNE
+            z_embedded = TSNE(n_components=2).fit_transform(all_z)
+            plt.figure()
+            plt.scatter(z_embedded[:,0], z_embedded[:,1], c=all_y, cmap='tab10')
+            plt.title(f'Latent space t-SNE epoch {epoch+1}')
+            buf = io.BytesIO()
+            plt.savefig(buf, format='png')
+            buf.seek(0)
+            mlflow.log_image(buf, f"tsne_epoch_{epoch+1}.png")
+            plt.close()
 
     def save_model(self, save_path):
         if save_path is not None:
