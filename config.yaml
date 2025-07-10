@@ -14,7 +14,7 @@ trainer:
   save_path: "dtcc_model_{}.pth"
   learning_rate: 0.005
   weight_decay: 0
-  lambda_cd: 0.01
+  lambda_cd: 0.1
   num_epochs: 500
   update_interval: 5
   mlflow:

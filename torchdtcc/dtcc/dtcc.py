@@ -2,61 +2,8 @@ import logging
 import torch
 import torch.nn as nn
 from typing import List
+from .dilated_rnn import DilatedRNN
 from .helper import EPS, stablize
-
-class DilatedRNN(nn.Module):
-    def __init__(self, input_dim, num_layers, hidden_dim, dilation_rates, bidirectional=True):
-        super(DilatedRNN, self).__init__()
-        self.num_layers = num_layers
-        self.hidden_dims = hidden_dim
-        self.dilation_rates = dilation_rates
-        self.bidirectional = bidirectional
-        
-        self.rnn_layers = nn.ModuleList()
-        for i in range(num_layers):
-            if i == 0:
-                self.rnn_layers.append(nn.GRU(input_dim, self.hidden_dims[i], batch_first=True, 
-                                             bidirectional=bidirectional))
-            else:
-                input_size = self.hidden_dims[i-1] * (2 if bidirectional else 1)
-                self.rnn_layers.append(nn.GRU(input_size, self.hidden_dims[i], batch_first=True, 
-                                             bidirectional=bidirectional))
-                
-    def forward(self, x):
-        assert x.ndim == 3, f"Input must be 3D, got {x.shape}"        
-        outputs = []
-        current_input = x
-        
-        for i, layer in enumerate(self.rnn_layers):
-            # Apply dilation
-            dilated_input = self._apply_dilation(current_input, self.dilation_rates[i])
-            output, hidden = layer(dilated_input)
-            outputs.append(hidden.view(hidden.size(1), -1))  # Extract last hidden state
-            current_input = output
-            
-        # Concatenate the last hidden state from each layer
-        return torch.cat(outputs, dim=1)
-    
-    def _apply_dilation(self, x, dilation_rate):
-        """
-        Apply dilation to input sequence.
-        Args:
-            x: [batch_size, seq_len, feature_dim]
-            dilation_rate: int
-        Returns:
-            Dilated x: [batch_size, new_seq_len, feature_dim]
-        """
-        batch_size, seq_len, feature_dim = x.size()
-        if seq_len < dilation_rate:
-            # Fallback: just return the last time step (or pad)
-            last_step = x[:, -1:, :]  # shape: [batch, 1, feature_dim]
-            return last_step
-        else:
-            # Usual dilation
-            indices = torch.arange(0, seq_len, dilation_rate, device=x.device)
-            dilated_x = torch.index_select(x, 1, indices)
-            return dilated_x
-
 
 class Encoder(nn.Module):
     def __init__(self, input_dim, num_layers, hidden_dim, dilation_rates, latent_dim):
@@ -140,6 +87,12 @@ class DTCC(nn.Module):
         return z, z_aug, x_recon, x_aug_recon
     
     def compute_reconstruction_loss(self, x, x_recon, x_aug, x_aug_recon):
+        # L_recon-org = 1/n ∑ ||x_i - x̂_i||_2^2
+        # ||x_i - x̂_i||_2^2 sums over sequence length and feature dimension for each sample.
+        # Then, this sum is averaged over the batch (1/n).
+        # recon_org = torch.sum((x - x_recon) ** 2, dim=(1, 2)).mean()
+        # recon_aug = torch.sum((x_aug - x_aug_recon) ** 2, dim=(1, 2)).mean()
+        # return recon_org + recon_aug
         recon_org = torch.mean((x - x_recon) ** 2)
         recon_aug = torch.mean((x_aug - x_aug_recon) ** 2)
         return recon_org + recon_aug
@@ -190,58 +143,111 @@ class DTCC(nn.Module):
 
         return (0.5 * (km_org + km_aug)), Q, Q_aug
     
-    def augmented_contrastive_loss(self, orig, aug, temperature, mask_dim, norm_dim=0):
-        # normalize matrices for similarity computation
-        orig_norm = nn.functional.normalize(orig, dim=norm_dim) #[latent_space, batch_size]
-        aug_norm = nn.functional.normalize(aug, dim=norm_dim) #[latent_space, batch_size]
+    def _calculate_info_nce_loss(self, query_features_matrix, positive_features_matrix, all_features_view1, all_features_view2, temperature):
+        """
+        Calculates InfoNCE-like loss as defined in Eq. 14 and 16.
         
-        # Compute similarity matrix
-        sim_matrix = torch.matmul(orig_norm.T, aug_norm) / temperature # [batch_size, batch_size]
-        # Positive pairs are on the diagonal
-        positives = torch.exp(torch.diag(sim_matrix)) # [batch_size, batch_size]
+        Args:
+            query_features_matrix (Tensor): Matrix where each row is a query vector (e.g., z for instance, Q.T for cluster).
+                                            Shape: [num_queries, feature_dim]
+            positive_features_matrix (Tensor): Matrix where each row is the positive key for the corresponding query.
+                                               Shape: [num_queries, feature_dim]
+            all_features_view1 (Tensor): Matrix of all potential negative keys from view 1.
+                                         Shape: [num_queries, feature_dim]
+            all_features_view2 (Tensor): Matrix of all potential negative keys from view 2.
+                                         Shape: [num_queries, feature_dim]
+            temperature (float): Temperature parameter.
+            
+        Returns:
+            Tensor: Loss terms for each query. Shape: [num_queries].
+        """
+        num_queries = query_features_matrix.size(0)
         
-        # some weird term exp(sim(q_i,q_j)/temp) of which i can't wrap my head around. 
-        # It should not contain the augmented ones since it has no superscrpit?
-        # is that a typo?
-        self_sim = torch.matmul(orig.T, orig) / temperature
-        self_positives = torch.exp(self_sim) # [batch_size, batch_size]
-        # compute denominator
-        exp_sim = torch.exp(sim_matrix) # [batch_size, batch_size]
-        mask = torch.eye(mask_dim, device=orig.device) # [batch_size, batch_size]
-        neg_mask = 1 - mask
+        # Normalize features along the feature dimension (dim=1)
+        query_norm = nn.functional.normalize(query_features_matrix, dim=1)
+        positive_norm = nn.functional.normalize(positive_features_matrix, dim=1)
+        all_v1_norm = nn.functional.normalize(all_features_view1, dim=1)
+        all_v2_norm = nn.functional.normalize(all_features_view2, dim=1)
+
+        # Numerator: exp(sim(query_i, positive_i) / temperature)
+        # This is a dot product of two matrices, then take the diagonal for (query_i, positive_i) pairs
+        sim_pos = torch.sum(query_norm * positive_norm, dim=1) / temperature # Element-wise product then sum for each row
+
+        # Denominator terms
+        # sim(query_i, all_j_from_view1) -> for term exp(sim(z_i, z_j)) or exp(sim(q_i, q_j))
+        sim_v1 = torch.matmul(query_norm, all_v1_norm.T) / temperature # [num_queries, num_queries]
+
+        # sim(query_i, all_j_from_view2) -> for term 1_[i≠j] exp(sim(z_i, z_j^a)) or 1_[i≠j] exp(sim(q_i, q_j^a))
+        sim_v2 = torch.matmul(query_norm, all_v2_norm.T) / temperature # [num_queries, num_queries]
+
+        # Apply 1_[i≠j] mask: for sim(query_i, view2_j), when i=j, it should be excluded (set to -inf before exp)
+        mask_diag = torch.eye(num_queries, device=query_features_matrix.device, dtype=torch.bool)
+        sim_v2.masked_fill_(mask_diag, float('-inf')) 
+
+        # Exponentiate similarities
+        exp_sim_pos = torch.exp(sim_pos) # [num_queries]
+        exp_sim_v1 = torch.exp(sim_v1) # [num_queries, num_queries]
+        exp_sim_v2 = torch.exp(sim_v2) # [num_queries, num_queries]
+
+        # Sum for denominator
+        # The sum is over j. So sum along dim=1
+        denominator = torch.sum(exp_sim_v1, dim=1) + torch.sum(exp_sim_v2, dim=1)
         
-        denominator = torch.sum(positives + exp_sim * neg_mask, dim=1)
-        return -torch.log(positives / denominator)
+        # Add a small epsilon for numerical stability
+        denominator = denominator.clamp(min=EPS)
+
+        loss_terms = -torch.log(exp_sim_pos / denominator)
+        return loss_terms
 
     
     def compute_instance_contrastive_loss(self, z, z_aug):
-        # make it [latent_space, batch_size] as defined in paper
-        z = z.T 
-        z_aug = z_aug.T
-        n = z.size(1) # batch_size
+        # z: [batch_size, latent_dim]
+        # z_aug: [batch_size, latent_dim]
+        n = z.size(0) # batch_size
 
-        loss_q = self.augmented_contrastive_loss(z, z_aug, self.tau_I, n)
-        loss_q_aug = self.augmented_contrastive_loss(z_aug, z, self.tau_I, n)
+        # For ℓ_{z_i}: query_features_matrix = z, positive_features_matrix = z_aug,
+        # all_features_view1 = z, all_features_view2 = z_aug
+        loss_z = self._calculate_info_nce_loss(z, z_aug, z, z_aug, self.tau_I)
+        
+        # For ℓ_{z_i^a}: query_features_matrix = z_aug, positive_features_matrix = z,
+        # all_features_view1 = z_aug, all_features_view2 = z
+        loss_z_aug = self._calculate_info_nce_loss(z_aug, z, z_aug, z, self.tau_I)
+        
         scalar = 1.0 / (2*n)
-        return scalar * (torch.sum(loss_q) + torch.sum(loss_q_aug))
-        
+        return scalar * (torch.sum(loss_z) + torch.sum(loss_z_aug))
+    
     def compute_cluster_contrastive_loss(self, Q, Q_aug):
-        # Q in [batch_size, num_clusters] -> k = num_clusters
-        k = Q.size(1) 
+        # Q: [batch_size, num_clusters]
+        # Q_aug: [batch_size, num_clusters]
+        k = Q.size(1) # num_clusters
         
-        loss_q = self.augmented_contrastive_loss(Q, Q_aug, self.tau_C, k)
-        loss_q_aug = self.augmented_contrastive_loss(Q_aug, Q, self.tau_C, k)
+        # For cluster contrastive, the queries are the columns of Q (or Q_aug).
+        # So, we need to transpose Q and Q_aug to make columns into rows for _calculate_info_nce_loss.
+        # Q_t: [num_clusters, batch_size]
+        Q_t = Q.T
+        Q_aug_t = Q_aug.T
+
+        # For ℓ_{q_i}: query_features_matrix = Q_t, positive_features_matrix = Q_aug_t,
+        # all_features_view1 = Q_t, all_features_view2 = Q_aug_t
+        loss_q = self._calculate_info_nce_loss(Q_t, Q_aug_t, Q_t, Q_aug_t, self.tau_C)
+        
+        # For ℓ_{q_i^a}: query_features_matrix = Q_aug_t, positive_features_matrix = Q_t,
+        # all_features_view1 = Q_aug_t, all_features_view2 = Q_t
+        loss_q_aug = self._calculate_info_nce_loss(Q_aug_t, Q_t, Q_aug_t, Q_t, self.tau_C)
+        
         scalar = 1.0 / (2*k)
         contrastive_loss = scalar * (torch.sum(loss_q) + torch.sum(loss_q_aug))
         
-        # Compute entropy term
-        P_q = torch.mean(Q, dim=0)
-        # tends to go down to negative close zero
+        # Compute entropy term H(q) = − ∑ [P (q_i) log P (q_i) + P (q_i^a) log P (q_i^a)]
+        P_q = torch.mean(Q, dim=0) # P(q_i) = 1/n ∑ q_ji
         P_q_aug = torch.mean(Q_aug, dim=0)
+        
         # Apply clamp for numerical stability
         P_q = torch.clamp(P_q, min=EPS)
         P_q_aug = torch.clamp(P_q_aug, min=EPS)
+        
         entropy = torch.sum(P_q * torch.log(P_q)) + torch.sum(P_q_aug * torch.log(P_q_aug))
         
-        # Dirty hack to keep the loss positive
+        # The paper's L_cluster = ... - H(q). Your `entropy` variable is already `-sum(P log P)`.
+        # So, `contrastive_loss + entropy` correctly implements `contrastive_loss - |H(q)|`.
         return (contrastive_loss + entropy)
