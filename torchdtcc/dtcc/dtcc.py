@@ -9,12 +9,12 @@ class Encoder(nn.Module):
     def __init__(self, input_dim, num_layers, hidden_dim, dilation_rates, latent_dim):
         super(Encoder, self).__init__()
         self.dilated_rnn = DilatedRNN(input_dim, num_layers, hidden_dim, dilation_rates)
-        self.norm = nn.LayerNorm(latent_dim)
+        #self.norm = nn.LayerNorm(latent_dim)
         
     def forward(self, x):
         assert x.ndim == 3, f"Input must be 3D, got {x.shape}"
         z = self.dilated_rnn(x)
-        return self.norm(z)
+        return z
 
 
 class Decoder(nn.Module):

@@ -20,7 +20,8 @@ class DTCCTrainer:
         num_epochs, 
         update_interval=5, 
         gradient_clip = None,
-        device="cpu"
+        device="cpu",
+        ablation = []
     ):
         self.model = model
         self.device = device
@@ -32,6 +33,7 @@ class DTCCTrainer:
         self.num_epochs = num_epochs
         self.update_interval = update_interval
         self.grad_clip_max = gradient_clip
+        self.ablation = ablation
 
     def run(self, save_path=None):
         self.model.train()
@@ -47,10 +49,20 @@ class DTCCTrainer:
                         x_aug = self.augment_time_series(x)
                         z, z_aug, x_recon, x_aug_recon = self.model(x, x_aug)
                         cd_loss, Q, Q_aug, debug_dict = self.model.compute_cluster_distribution_loss(z, z_aug)
-                        cd_loss = torch.tensor(0.0)
                         recon_loss = self.model.compute_reconstruction_loss(x, x_recon, x_aug, x_aug_recon)
-                        instance_loss = torch.tensor(0.0) #self.model.compute_instance_contrastive_loss(z, z_aug)
-                        cluster_loss = torch.tensor(0.0) #self.model.compute_cluster_contrastive_loss(Q, Q_aug)
+                        instance_loss = self.model.compute_instance_contrastive_loss(z, z_aug)
+                        cluster_loss = self.model.compute_cluster_contrastive_loss(Q, Q_aug)
+
+                        # enable ablation analysis if defined
+                        if self.ablation and not "all" in self.ablation:
+                            if not "contrastive" in self.ablation:
+                                instance_loss = torch.tensor(0.0)
+                                cluster_loss = torch.tensor(0.0)
+                            if not "distribution" in self.ablation:
+                                cd_loss = torch.tensor(0.0)
+                            if not "reconstruction" in self.ablation:
+                                recon_loss = torch.tensor(0.0)
+
                         loss = recon_loss + instance_loss + cluster_loss + self.lambda_cd * cd_loss
 
                         self.debug_svd(epoch, Q, debug_dict)

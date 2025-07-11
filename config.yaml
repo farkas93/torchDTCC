@@ -8,7 +8,7 @@ model:
   dilation_rates: [1, 4, 16]  # These look good
   tau_I: 0.1  # Lower temperature for sharper instance contrasts
   tau_C: 0.2  # Lower temperature for cluster contrasts
-  stable_svd: true
+  stable_svd: false
 
 trainer:
   save_path: "dtcc_model_{}.pth"
@@ -19,9 +19,11 @@ trainer:
   update_interval: 5
   gradient_clip: 1.0 
   mlflow:
+    server_uri: "databricks" # remove or set to databricks if using on databricks
     # databricks example. databricks requires this scheme for experiment name
     experiment: "/Users/first.last@companydomain.com/my_experiment_name"
     run: 'my_run_1'
+    ablation: ["contrastive"] # "contrastive", "all", "reconstruction", "distribution"
 
 data:
   path: "./data/plane/"

@@ -1,13 +1,10 @@
 import mlflow
 import mlflow.pytorch
 import torch
-import torch.optim as optim
 from torch.utils.data import DataLoader
-from tqdm import tqdm
 import logging
-from typing import Dict
+from typing import Dict, List
 from torchdtcc.dtcc.dtcc import DTCC
-from torchdtcc.dtcc.clustering import Clusterer
 from torchdtcc.datasets.augmented_dataset import AugmentedDataset
 from .trainer import DTCCTrainer
 from sklearn.manifold import TSNE
@@ -27,10 +24,14 @@ class MlFlowDTCCTrainer(DTCCTrainer):
         update_interval=5,
         gradient_clip = None,
         device="cpu",
+        server_uri:str = "databricks",
         experiment_name: str = "MLflow_DTCC_Training",
-        run_name: str = "default_run"
+        run_name: str = "default_run",
+        ablation: List = []
     ):
-        super().__init__(model, dataloader, augment_time_series, optimizer, lambda_cd, num_epochs, update_interval, gradient_clip, device)
+        super().__init__(model, dataloader, augment_time_series, optimizer, lambda_cd, num_epochs, update_interval, gradient_clip, device, ablation)
+        if not server_uri == "databricks":
+            mlflow.set_tracking_uri(server_uri)
         self.experiment_name = experiment_name
         self.run_name = run_name
         mlflow.set_experiment(experiment_name)
@@ -128,6 +129,8 @@ class MlFlowDTCCTrainer(DTCCTrainer):
             update_interval=trainer_cfg.get("update_interval", 5),
             gradient_clip=trainer_cfg.get("gradient_clip", None),
             device=env["device"],
+            server_uri=mlflow_cfg.get("server_uri", "databricks"),
             experiment_name=mlflow_cfg.get("experiment", "MLflow_DTCC_Training"),
-            run_name=mlflow_cfg.get("run", "default_run")
+            run_name=mlflow_cfg.get("run", "default_run"),
+            ablation=mlflow_cfg.get("ablation", [])
         )
