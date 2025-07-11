@@ -1,5 +1,6 @@
 import mlflow
 import mlflow.pytorch
+import tempfile
 import torch
 from torch.utils.data import DataLoader
 import logging
@@ -9,7 +10,7 @@ from torchdtcc.datasets.augmented_dataset import AugmentedDataset
 from .trainer import DTCCTrainer
 from sklearn.manifold import TSNE
 import matplotlib.pyplot as plt
-import io
+import os
 import numpy as np
 
 class MlFlowDTCCTrainer(DTCCTrainer):
@@ -85,27 +86,25 @@ class MlFlowDTCCTrainer(DTCCTrainer):
         self.create_tsne_plot(epoch)
     
     def create_tsne_plot(self, epoch):
-        if epoch % 10 == 0:
-            all_z, all_y = [], []
-            for x, y in self.dataloader:
-                x = x.to(self.device)
-                z = self.model.encoder(x)
-                all_z.append(z.detach().cpu().numpy())
-                all_y.append(y.cpu().numpy())
-            all_z = np.concatenate(all_z, axis=0)
-            all_y = np.concatenate(all_y, axis=0)
+        all_z, all_y = [], []
+        for x, y in self.dataloader:
+            x = x.to(self.device)
+            z = self.model.encoder(x)
+            all_z.append(z.detach().cpu().numpy())
+            all_y.append(y.cpu().numpy())
+        all_z = np.concatenate(all_z, axis=0)
+        all_y = np.concatenate(all_y, axis=0)
 
-            # t-SNE
-            z_embedded = TSNE(n_components=2).fit_transform(all_z)
-            plt.figure()
-            plt.scatter(z_embedded[:,0], z_embedded[:,1], c=all_y, cmap='tab10')
-            plt.title(f'Latent space t-SNE epoch {epoch+1}')
-            buf = io.BytesIO()
-            plt.savefig(buf, format='png')
-            buf.seek(0)
-            mlflow.log_figure(buf, f"tsne_epoch_{epoch+1}.png")
-            mlflow.log_artifact(buf, f"tsne_epoch_{epoch+1}.png")
-            plt.close()
+        # t-SNE
+        z_embedded = TSNE(n_components=2).fit_transform(all_z)
+        plt.figure()
+        plt.scatter(z_embedded[:,0], z_embedded[:,1], c=all_y, cmap='tab10')
+        plt.title(f'Latent space t-SNE epoch {epoch+1}')
+        with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as tmp_file:
+            plt.savefig(tmp_file.name, format='png')
+            mlflow.log_artifact(tmp_file.name, f"tsne_epoch_{epoch+1}.png")
+        os.unlink(tmp_file.name)  # Clean up the temporary file
+        plt.close()
 
     def save_model(self, save_path):
         if save_path is not None:
