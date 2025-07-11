@@ -49,7 +49,7 @@ class MlFlowDTCCTrainer(DTCCTrainer):
             result = super().run(save_path)
         return result
     
-    def debug_svd(self, epoch, Q, svds):
+    def debug_svd(self, epoch, Q, Q_aug, svds):
         if hasattr(self.model, 'compute_cluster_distribution_loss'):
             # After calling compute_cluster_distribution_loss(z, z_aug)
             with torch.no_grad():
@@ -57,6 +57,11 @@ class MlFlowDTCCTrainer(DTCCTrainer):
                 hist, _ = np.histogram(Q_hist, bins=np.arange(self.model.get_num_clusters() + 1))
                 for i, count in enumerate(hist):
                     mlflow.log_metric(f"cluster_count_{i}", int(count), step=epoch+1)
+                
+                Q_hist = torch.argmax(Q_aug, dim=1).cpu().numpy()
+                hist, _ = np.histogram(Q_hist, bins=np.arange(self.model.get_num_clusters() + 1))
+                for i, count in enumerate(hist):
+                    mlflow.log_metric(f"aug_cluster_count_{i}", int(count), step=epoch+1)
         with torch.no_grad():
             for i, s in enumerate(svds['S'].cpu().numpy()):
                 mlflow.log_metric(f"svd_singular_{i}", float(s), step=epoch+1)

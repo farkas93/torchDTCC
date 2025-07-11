@@ -90,14 +90,14 @@ class DTCC(nn.Module):
         # L_recon-org = 1/n ∑ ||x_i - x̂_i||_2^2
         # ||x_i - x̂_i||_2^2 sums over sequence length and feature dimension for each sample.
         # Then, this sum is averaged over the batch (1/n).
-        # recon_org = torch.sum((x - x_recon) ** 2, dim=(1, 2)).mean()
-        # recon_aug = torch.sum((x_aug - x_aug_recon) ** 2, dim=(1, 2)).mean()
-        # return recon_org + recon_aug
+        recon_org = torch.sum((x - x_recon) ** 2, dim=(1, 2)).mean()
+        recon_aug = torch.sum((x_aug - x_aug_recon) ** 2, dim=(1, 2)).mean()
+        return recon_org + recon_aug
         recon_org = torch.mean((x - x_recon) ** 2)
         recon_aug = torch.mean((x_aug - x_aug_recon) ** 2)
         return recon_org + recon_aug
     
-    def compute_cluster_distribution_loss(self, z, z_aug):
+    def calculate_Q(self, z, z_aug):
         assert not torch.isnan(z).any(), "NaN in z before SVD"
         assert not torch.isinf(z).any(), "Inf in z before SVD"
         assert not torch.isnan(z_aug).any(), "NaN in z_aug before SVD"
@@ -121,7 +121,9 @@ class DTCC(nn.Module):
         U_aug, S_aug, V_aug = torch.linalg.svd(z_aug)
         Q_aug = U_aug[:, :self.num_clusters]
         assert not torch.isnan(Q_aug).any(), "NaN in Q_aug after SVD"
-        
+        return Q, Q_aug, {"U": U, "S": S, "V": V, "U_aug": U_aug, "S_aug": S_aug, "V_aug": V_aug}
+
+    def compute_cluster_distribution_loss(self, z, z_aug, Q, Q_aug):
         # If one does not transpose z, you don't have the dimensionalities described in the paper and the math
         # does not work.
         z = z.T
@@ -141,7 +143,7 @@ class DTCC(nn.Module):
         km_org = torch.trace(gram_matrix) - torch.trace(QZTZQ)
         km_aug = torch.trace(gram_matrix_aug) - torch.trace(QZTZQ_aug)
 
-        return (0.5 * (km_org + km_aug)), Q, Q_aug, {"U": U, "S": S, "V": V, "U_aug": U_aug, "S_aug": S_aug, "V_aug": V_aug}
+        return (0.5 * (km_org + km_aug))
     
     def _calculate_info_nce_loss(self, query_features_matrix, positive_features_matrix, all_features_view1, all_features_view2, temperature):
         """

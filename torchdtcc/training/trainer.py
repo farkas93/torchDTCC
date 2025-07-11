@@ -37,21 +37,32 @@ class DTCCTrainer:
 
     def run(self, save_path=None):
         self.model.train()
+        Qs = {}
+        Q_augs = {}
         for epoch in range(self.num_epochs):
             epoch_loss = 0
             recon_losses, instance_losses, cd_losses, cluster_losses, total_losses = [], [], [], [], []
             with tqdm(total=len(self.dataloader), desc=f'Epoch {epoch+1}/{self.num_epochs}') as pbar:
             
                 try:
+
                     for i, batch in enumerate(self.dataloader):
                         x, y = batch
                         x = x.to(self.device)
                         x_aug = self.augment_time_series(x)
                         z, z_aug, x_recon, x_aug_recon = self.model(x, x_aug)
-                        cd_loss, Q, Q_aug, debug_dict = self.model.compute_cluster_distribution_loss(z, z_aug)
+
+                        if epoch % self.update_interval == 0:                        
+                            # Calculate Q with the combined embeddings
+                            Q, Q_aug, debug_dict = self.model.calculate_Q(z, z_aug)
+                            # Detach tensors before storing them
+                            Qs[i], Q_augs[i] = Q.detach(), Q_aug.detach()
+                            self.debug_svd(epoch, Qs[i], Q_augs[i], debug_dict)
+
+                        cd_loss = self.model.compute_cluster_distribution_loss(z, z_aug, Qs[i], Q_augs[i])
                         recon_loss = self.model.compute_reconstruction_loss(x, x_recon, x_aug, x_aug_recon)
                         instance_loss = self.model.compute_instance_contrastive_loss(z, z_aug)
-                        cluster_loss = self.model.compute_cluster_contrastive_loss(Q, Q_aug)
+                        cluster_loss = self.model.compute_cluster_contrastive_loss(Qs[i], Q_augs[i])
 
                         # enable ablation analysis if defined
                         if self.ablation and not "all" in self.ablation:
@@ -65,7 +76,6 @@ class DTCCTrainer:
 
                         loss = recon_loss + instance_loss + cluster_loss + self.lambda_cd * cd_loss
 
-                        self.debug_svd(epoch, Q, debug_dict)
                         recon_losses.append(recon_loss.item())
                         cd_losses.append(cd_loss.item())
                         instance_losses.append(instance_loss.item())
@@ -109,7 +119,7 @@ class DTCCTrainer:
         self.save_model(save_path)  # Moved outside loop to save only final model
         return self.model
 
-    def debug_svd(self, epoch, Q, svds):
+    def debug_svd(self, epoch, Q, Q_aug, svds):
         pass
 
     def log_loss(self, epoch, avg_recon, avg_instance, avg_cd, avg_cluster, avg_total):
