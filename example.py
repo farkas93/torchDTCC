@@ -50,9 +50,8 @@ def hyperparam_search():
     tauIs = []
     tauCs = []
     hps = HyperparameterSearch(config, dataset, tauIs, tauCs, MlFlowDTCCTrainer.from_config)
-    grid = hps.grid_search()
     metric = "nmi"
-    best = hps.get_best_params(metric=metric)
+    best = hps.grid_search(metric=metric)    
     print(f"Best scoring {metric}: {best}")
 
 if __name__ == "__main__":
