@@ -51,7 +51,7 @@ class ToyAugmentedDataset(AugmentedDataset):
 
     def augmentation(self, batch_x):
         # Optionally add toy augmentations here, or just return batch_x
-        return batch_x  # No augmentation by default (safe for debugging) 
+        #return batch_x  # No augmentation by default (safe for debugging) 
         assert batch_x.ndim == 3, f"Input must be 3D, got {batch_x.shape}"
         
         augmentations = [jitter]
