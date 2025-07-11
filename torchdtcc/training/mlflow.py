@@ -103,7 +103,8 @@ class MlFlowDTCCTrainer(DTCCTrainer):
             buf = io.BytesIO()
             plt.savefig(buf, format='png')
             buf.seek(0)
-            mlflow.log_image(buf, f"tsne_epoch_{epoch+1}.png")
+            mlflow.log_figure(buf, f"tsne_epoch_{epoch+1}.png")
+            mlflow.log_artifact(buf, f"tsne_epoch_{epoch+1}.png")
             plt.close()
 
     def save_model(self, save_path):
