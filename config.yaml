@@ -9,6 +9,10 @@ model:
   tau_I: 0.5  # Lower temperature for sharper instance contrasts
   tau_C: 0.5  # Lower temperature for cluster contrasts
   stable_svd: false
+  # In the paper the authors describe the autoencoder as two 
+  # independent instances, which implies they are not siamese networks.
+  # However, in contrastive learning usually the networks are siamese.
+  # that is why the option for weight sharing is implemented.
   weight_sharing: false
 
 trainer:
