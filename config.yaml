@@ -4,26 +4,26 @@ model:
   input_dim: 1
   num_layers: 3
   num_clusters: 3
-  hidden_dims: [64, 32, 32]  # Simplified architecture with consistent dimensions
+  hidden_dims: [100, 50, 50]  # Simplified architecture with consistent dimensions
   dilation_rates: [1, 4, 16]  # These look good
-  tau_I: 0.1  # Lower temperature for sharper instance contrasts
-  tau_C: 0.2  # Lower temperature for cluster contrasts
+  tau_I: 0.5  # Lower temperature for sharper instance contrasts
+  tau_C: 0.5  # Lower temperature for cluster contrasts
   stable_svd: false
 
 trainer:
   save_path: "dtcc_model_{}.pth"
-  learning_rate: 0.0005
-  weight_decay: 1e-4
-  lambda_cd: 15.0
-  num_epochs: 500
+  learning_rate: 0.005
+  weight_decay: 0.1
+  lambda_cd: 2.0
+  num_epochs: 1000
   update_interval: 5
-  gradient_clip: 1.0 
+  gradient_clip: 1.0
   mlflow:
     server_uri: "databricks" # remove or set to databricks if using on databricks
     # databricks example. databricks requires this scheme for experiment name
     experiment: "/Users/first.last@companydomain.com/my_experiment_name"
     run: 'my_run_1'
-    ablation: ["contrastive"] # "contrastive", "all", "reconstruction", "distribution"
+    ablation: ["all"] # "contrastive", "all", "reconstruction", "distribution"
 
 data:
   path: "./data/plane/"
