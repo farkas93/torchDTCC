@@ -38,16 +38,19 @@ class DTCC(nn.Module):
                  dilation_rates: List[int], 
                  tau_I: float = 0.5,
                  tau_C: float = 0.5,
+                 weight_sharing = False,
                  stable_svd: bool = False):
         super(DTCC, self).__init__()
         latent_dim = sum(hidden_dims) * 2 # the hidden dims times 2 for being bidirectional
         self.encoder = Encoder(input_dim, num_layers, hidden_dims, dilation_rates, latent_dim)
         self.decoder = Decoder(latent_dim, input_dim)
-        self.aug_encoder = Encoder(input_dim, num_layers, hidden_dims, dilation_rates, latent_dim)
-        self.aug_decoder = Decoder(latent_dim, input_dim)
+        if weight_sharing:
+            self.aug_encoder = Encoder(input_dim, num_layers, hidden_dims, dilation_rates, latent_dim)
+            self.aug_decoder = Decoder(latent_dim, input_dim)
         self.num_clusters = num_clusters
         self.tau_I = tau_I  # Instance temperature
         self.tau_C = tau_C  # Cluster temperature
+        self.weight_sharing = weight_sharing
         self.stable_svd = stable_svd
         self._init_weights()
     
@@ -81,9 +84,12 @@ class DTCC(nn.Module):
         x_recon = self.decoder(z, x.size(1))
         
         # Augmented view
-        z_aug = self.aug_encoder(x_aug)
-        x_aug_recon = self.aug_decoder(z_aug, x_aug.size(1))
-        
+        if self.weight_sharing:
+            z_aug = self.aug_encoder(x_aug)
+            x_aug_recon = self.aug_decoder(z_aug, x_aug.size(1))
+        else:
+            z_aug = self.encoder(x)
+            x_aug_recon = self.decoder(z_aug, x_aug.size(1))
         return z, z_aug, x_recon, x_aug_recon
     
     def compute_reconstruction_loss(self, x, x_recon, x_aug, x_aug_recon):

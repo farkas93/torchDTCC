@@ -9,6 +9,7 @@ model:
   tau_I: 0.5  # Lower temperature for sharper instance contrasts
   tau_C: 0.5  # Lower temperature for cluster contrasts
   stable_svd: false
+  weight_sharing: false
 
 trainer:
   save_path: "dtcc_model_{}.pth"

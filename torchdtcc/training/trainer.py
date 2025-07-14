@@ -150,7 +150,8 @@ class DTCCTrainer:
             dilation_rates=model_cfg["dilation_rates"],
             tau_I=model_cfg["tau_I"],
             tau_C=model_cfg["tau_C"],
-            stable_svd=model_cfg["stable_svd"]
+            stable_svd=model_cfg["stable_svd"],
+            weight_sharing=model_cfg["weight_sharing"]
         ).to(device)
 
         optimizer = optim.Adam(
