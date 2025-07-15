@@ -3,7 +3,7 @@ from copy import deepcopy
 import torch
 from typing import Dict, List, Tuple, Callable
 import logging
-from .trainer import DTCCTrainer
+from .dtcc.trainer import DTCCTrainer
 from torchdtcc.dtcc.clustering import Clusterer
 from torchdtcc.datasets.augmented_dataset import AugmentedDataset
 

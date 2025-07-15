@@ -1,7 +1,7 @@
 import yaml
-from torchdtcc.training.trainer import DTCCTrainer
-from torchdtcc.training.autoencoder_trainer import DTCCAutoencoderTrainer
-from torchdtcc.training.mlflow import MlFlowDTCCTrainer
+from torchdtcc.training.dtcc.trainer import DTCCTrainer
+from torchdtcc.training.dtcc.mlflow import MlFlowDTCCTrainer
+from torchdtcc.training.autoencoder.trainer import DTCCAutoencoderTrainer
 from torchdtcc.dtcc.clustering import Clusterer
 from torch.utils.data import DataLoader
 from torchdtcc.datasets.test.toy import ToyAugmentedDataset

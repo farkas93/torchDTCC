@@ -5,8 +5,8 @@ from torch.utils.data import DataLoader
 from tqdm import tqdm
 import logging
 from typing import Dict
-from ..dtcc.clustering import Clusterer
-from ..dtcc.dtcc import DTCC
+from torchdtcc.dtcc.clustering import Clusterer
+from torchdtcc.dtcc.dtcc import DTCC
 from torchdtcc.datasets.augmented_dataset import AugmentedDataset
 
 class DTCCTrainer:

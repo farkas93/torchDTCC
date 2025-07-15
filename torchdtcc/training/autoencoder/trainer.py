@@ -1,12 +1,10 @@
-
 import torch
 import torch.optim as optim
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 import logging
 from typing import Dict
-from ..dtcc.clustering import Clusterer
-from ..dtcc.autoencoder import DTCCAutoencoder
+from torchdtcc.dtcc.autoencoder import DTCCAutoencoder
 from torchdtcc.datasets.augmented_dataset import AugmentedDataset
 
 class DTCCAutoencoderTrainer:
@@ -18,7 +16,8 @@ class DTCCAutoencoderTrainer:
         optimizer,
         num_epochs,
         gradient_clip = None,
-        device="cpu"
+        device="cpu",
+        lr_scheduler=None  # Added LR scheduler
     ):
         self.model = model
         self.device = device
@@ -27,6 +26,7 @@ class DTCCAutoencoderTrainer:
         self.optimizer = optimizer
         self.num_epochs = num_epochs
         self.grad_clip_max = gradient_clip
+        self.lr_scheduler = lr_scheduler  # Added LR scheduler
 
     def run(self, save_path=None):
         self.model.train()
@@ -34,9 +34,7 @@ class DTCCAutoencoderTrainer:
             epoch_loss = 0.0
             recon_losses = []
             with tqdm(total=len(self.dataloader), desc=f'Epoch {epoch+1}/{self.num_epochs}') as pbar:
-            
                 try:
-
                     for i, batch in enumerate(self.dataloader):
                         x, y = batch
                         x = x.to(self.device)
@@ -45,11 +43,9 @@ class DTCCAutoencoderTrainer:
                         recon_loss = self.model.compute_reconstruction_loss(x, x_recon)
                         z, x_aug_recon = self.model(x_aug)
                         recon_loss += self.model.compute_reconstruction_loss(x_aug, x_aug_recon)
-
                         recon_loss *= 0.5
 
                         recon_losses.append(recon_loss.item())
-
                         logging.debug(f"Step {i} | recon: {recon_loss.item():.4f}")
 
                         self.optimizer.zero_grad()
@@ -72,12 +68,13 @@ class DTCCAutoencoderTrainer:
                     raise
 
             avg_recon = sum(recon_losses) / len(recon_losses)
-
             self.log_loss(epoch, avg_recon)
 
-        self.save_model(save_path)  # Moved outside loop to save only final model
-        return self.model
+            if self.lr_scheduler:  # Step the scheduler
+                self.lr_scheduler.step()
 
+        self.save_model(save_path)
+        return self.model
 
     def debug_svd(self, epoch, Q, Q_aug, svds):
         pass
@@ -85,7 +82,7 @@ class DTCCAutoencoderTrainer:
     def log_loss(self, epoch, avg_recon):
         logging.info(f"Epoch {epoch+1}/{self.num_epochs} | avg recon: {avg_recon:.4f}")
 
-    def log_evaluation(self, epoch, metrics):  # Fixed method name
+    def log_evaluation(self, epoch, metrics):
         pass
 
     def save_model(self, save_path):
@@ -124,6 +121,16 @@ class DTCCAutoencoderTrainer:
         trainer_cfg = config.get("trainer", {})
         env = DTCCAutoencoderTrainer._setup_model_environment(config, dataset)
 
+        lr_scheduler = None
+        if "lr_scheduler" in trainer_cfg:
+            scheduler_cfg = trainer_cfg["lr_scheduler"]
+            if scheduler_cfg["type"] == "StepLR":
+                lr_scheduler = torch.optim.lr_scheduler.StepLR(
+                    env["optimizer"],
+                    step_size=scheduler_cfg.get("step_size", 30),
+                    gamma=scheduler_cfg.get("gamma", 0.1)
+                )
+
         return DTCCAutoencoderTrainer(
             model=env["model"],
             dataloader=env["dataloader"],
@@ -131,5 +138,6 @@ class DTCCAutoencoderTrainer:
             optimizer=env["optimizer"],
             num_epochs=trainer_cfg.get("num_epochs", 100),
             gradient_clip=trainer_cfg.get("gradient_clip", None),
-            device=env["device"]
+            device=env["device"],
+            lr_scheduler=lr_scheduler  # Added LR scheduler
         )
