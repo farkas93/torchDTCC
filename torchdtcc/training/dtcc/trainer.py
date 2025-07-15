@@ -5,6 +5,7 @@ from torch.utils.data import DataLoader
 from tqdm import tqdm
 import logging
 from typing import Dict
+from ..autoencoder.trainer import DTCCAutoencoderTrainer
 from torchdtcc.dtcc.clustering import Clusterer
 from torchdtcc.dtcc.dtcc import DTCC
 from torchdtcc.datasets.augmented_dataset import AugmentedDataset
@@ -17,7 +18,8 @@ class DTCCTrainer:
         augment_time_series, 
         optimizer, 
         lambda_cd, 
-        num_epochs, 
+        num_epochs,
+        warmup_trainer=None,
         update_interval=5, 
         gradient_clip = None,
         device="cpu",
@@ -34,8 +36,18 @@ class DTCCTrainer:
         self.update_interval = update_interval
         self.grad_clip_max = gradient_clip
         self.ablation = ablation
+        self.warmup_trainer = warmup_trainer
+
+    def warmup(self, save_path):
+        if self.warmup_trainer:
+            pt_model = self.warmup_trainer.run(save_path)
+            self.model.set_autoencoder_weights(pt_model)
+        else:
+            logging.warning("No warmup trainer initialized, can't perform warmup! Please specify a warmup configuration or run a normal training.")
+
 
     def run(self, save_path=None):
+
         self.model.train()
         num_clusters = self.model.get_num_clusters()
 
@@ -44,8 +56,7 @@ class DTCCTrainer:
         for epoch in range(self.num_epochs):
             epoch_loss = 0.0
             recon_losses, instance_losses, cd_losses, cluster_losses, total_losses = [], [], [], [], []
-            with tqdm(total=len(self.dataloader), desc=f'Epoch {epoch+1}/{self.num_epochs}') as pbar:
-            
+            with tqdm(total=len(self.dataloader), desc=f'Epoch {epoch+1}/{self.num_epochs}', position=0, leave=(epoch + 1) % self.update_interval == 0) as pbar:            
                 try:
 
                     for i, batch in enumerate(self.dataloader):
@@ -54,17 +65,23 @@ class DTCCTrainer:
                         x_aug = self.augment_time_series(x)
                         z, z_aug, x_recon, x_aug_recon = self.model(x, x_aug)
                         if epoch == 0:
-                            # Init Q's
-                            batch_size = x.size(0)
-                            # For a 2D tensor [batch_size, num_clusters]
-                            init_Q = torch.zeros(batch_size, num_clusters)
-                            # Set diagonal elements to 1 (up to min dimension)
-                            min_dim = min(batch_size, num_clusters)
-                            for j in range(min_dim):
-                                init_Q[j, j] = 1.0
-                            
-                            Qs[i] = init_Q.to(self.device)
-                            Q_augs[i] = init_Q.to(self.device)
+                            if self.warmup_trainer:
+                                # Calculate Q with the combined embeddings
+                                Q, Q_aug, debug_dict = self.model.calculate_Q(z, z_aug)
+                                # Detach tensors before storing them
+                                Qs[i], Q_augs[i] = Q.detach(), Q_aug.detach()
+                            else:
+                                # Init Q's
+                                batch_size = x.size(0)
+                                # For a 2D tensor [batch_size, num_clusters]
+                                init_Q = torch.zeros(batch_size, num_clusters)
+                                # Set diagonal elements to 1 (up to min dimension)
+                                min_dim = min(batch_size, num_clusters)
+                                for j in range(min_dim):
+                                    init_Q[j, j] = 1.0
+                                
+                                Qs[i] = init_Q.to(self.device)
+                                Q_augs[i] = init_Q.to(self.device)
                         cd_loss = self.model.compute_cluster_distribution_loss(z, z_aug, Qs[i], Q_augs[i])
                         recon_loss = self.model.compute_reconstruction_loss(x, x_recon, x_aug, x_aug_recon)
                         instance_loss = self.model.compute_instance_contrastive_loss(z, z_aug)
@@ -103,7 +120,7 @@ class DTCCTrainer:
                         self.optimizer.step()
                         epoch_loss += loss.item()
 
-                        if epoch > 1 and epoch % self.update_interval == 0:                        
+                        if epoch > 1 and epoch % self.update_interval == 0:
                             # Calculate Q with the combined embeddings
                             Q, Q_aug, debug_dict = self.model.calculate_Q(z, z_aug)
                             # Detach tensors before storing them
@@ -184,6 +201,11 @@ class DTCCTrainer:
         trainer_cfg = config.get("trainer", {})
         env = DTCCTrainer._setup_model_environment(config, dataset)
 
+        warmup_trainer=None
+        if trainer_cfg.get("warmup", False):            
+            if "warmup" in config:
+                warmup_trainer = DTCCAutoencoderTrainer.from_config(config, dataset)
+
         return DTCCTrainer(
             model=env["model"],
             dataloader=env["dataloader"],
@@ -194,5 +216,6 @@ class DTCCTrainer:
             update_interval=trainer_cfg.get("update_interval", 5),
             gradient_clip=trainer_cfg.get("gradient_clip", None),
             ablation=trainer_cfg.get("ablation", []),
-            device=env["device"]
+            device=env["device"],
+            warmup_trainer=warmup_trainer
         )

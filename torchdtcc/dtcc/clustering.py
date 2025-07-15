@@ -43,7 +43,7 @@ class Clusterer:
             for batch in dataloader:
                 X, y = batch
                 X = X.to(self.device)
-                z = self.model.encoder(X)
+                z = self.model.encode(X)
                 zs.append(z)
         return torch.cat(zs, dim=0)  # shape [N, d]
 

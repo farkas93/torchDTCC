@@ -23,10 +23,13 @@ with open("config.yaml", "r") as f:
 
 # Prepare dataset and dataloader
 data_cfg = config.get("data", {})
-dataset = MeatArffDataset(path=data_cfg['path'], normalize=data_cfg['normalize'])
+dataset = PlaneArffDataset(path=data_cfg['path'], normalize=data_cfg['normalize'])
 
 model_cfg = config.get("model", {})
 logging.info(f"STABLE SVD: {model_cfg['stable_svd']}")
+
+from datetime import datetime
+date = datetime.now().strftime("%y_%m_%d")
 
 def load_model_clustering_example():
     model_path = config.get("trainer", {}).get("save_path", "")
@@ -46,12 +49,14 @@ def use_model_clustering_example(model):
 
 def run_training():    
     trainer = DTCCTrainer.from_config(config, dataset)
+    warmup_path = config.get("warmup", {}).get("save_path", "")
     save_path = config.get("trainer", {}).get("save_path", "")
-    return trainer.run(save_path=save_path)
+    trainer.warmup(warmup_path)
+    return trainer.run(save_path=save_path.format(date))
 
-def run_debug_training():
+def run_warmup_training():
     trainer = DTCCAutoencoderTrainer.from_config(config, dataset)
-    return trainer.run("")
+    return trainer.run("pt_dtccae_{}".format(date))
 
 def hyperparam_search():
     tauIs = []
@@ -62,10 +67,10 @@ def hyperparam_search():
     print(f"Best scoring {metric}: {best}")
 
 if __name__ == "__main__":
-    model = run_debug_training()
+    model = run_training()
     
     # For clustering in production
-    # dataloader = DataLoader(dataset, batch_size=data_cfg.get("batch_size", 64), shuffle=False)
-    # clusterer = use_model_clustering_example(model)
-    # labels = clusterer.cluster(dataloader, method="kmeans")  # or "soft", "argmax"
-    # print(f"resulting predictions:\n{labels}")
+    dataloader = DataLoader(dataset, batch_size=data_cfg.get("batch_size", 64), shuffle=False)
+    clusterer = use_model_clustering_example(model)
+    labels = clusterer.cluster(dataloader, method="kmeans")  # or "soft", "argmax"
+    print(f"resulting predictions:\n{labels}")

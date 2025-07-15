@@ -2,33 +2,8 @@ import logging
 import torch
 import torch.nn as nn
 from typing import List
-from .dilated_rnn import DilatedRNN
+from .autoencoder import DTCCAutoencoder
 from .helper import EPS, stablize
-
-class Encoder(nn.Module):
-    def __init__(self, input_dim, num_layers, hidden_dim, dilation_rates, latent_dim):
-        super(Encoder, self).__init__()
-        self.dilated_rnn = DilatedRNN(input_dim, num_layers, hidden_dim, dilation_rates)
-        self.norm = nn.LayerNorm(latent_dim)
-        
-    def forward(self, x):
-        assert x.ndim == 3, f"Input must be 3D, got {x.shape}"
-        z = self.dilated_rnn(x)
-        z = self.norm(z)
-        return z
-
-
-class Decoder(nn.Module):
-    def __init__(self, latent_dim, output_dim):
-        super(Decoder, self).__init__()
-        self.rnn = nn.GRU(latent_dim, latent_dim, batch_first=True)
-        self.output_layer = nn.Linear(latent_dim, output_dim)
-        
-    def forward(self, z, seq_len):
-        # Expand z to sequence length
-        z_expanded = z.unsqueeze(1).repeat(1, seq_len, 1)
-        output, _ = self.rnn(z_expanded)
-        return self.output_layer(output)
 
 class DTCC(nn.Module):
     def __init__(self, 
@@ -40,74 +15,84 @@ class DTCC(nn.Module):
                  tau_I: float = 0.5,
                  tau_C: float = 0.5,
                  weight_sharing = False,
-                 stable_svd: bool = False):
+                 stable_svd: bool = False
+                 ):
         super(DTCC, self).__init__()
-        latent_dim = sum(hidden_dims) * 2 # the hidden dims times 2 for being bidirectional
-        self.encoder = Encoder(input_dim, num_layers, hidden_dims, dilation_rates, latent_dim)
-        self.decoder = Decoder(latent_dim, input_dim)
-        if weight_sharing:
-            self.aug_encoder = Encoder(input_dim, num_layers, hidden_dims, dilation_rates, latent_dim)
-            self.aug_decoder = Decoder(latent_dim, input_dim)
+        self.autoenc = DTCCAutoencoder(input_dim, num_layers, hidden_dims, dilation_rates)
+        self.aug_autoenc = None
+        if not weight_sharing:
+            self.aug_autoenc = DTCCAutoencoder(input_dim, num_layers, hidden_dims, dilation_rates)
         self.num_clusters = num_clusters
         self.tau_I = tau_I  # Instance temperature
         self.tau_C = tau_C  # Cluster temperature
         self.weight_sharing = weight_sharing
         self.stable_svd = stable_svd
-        #self._init_weights()
     
-    def _init_weights(self):
-        # Xavier/Glorot init
-        for m in self.modules():
 
-            print(f"Xavier init Module: {m}")
-            if isinstance(m, nn.GRU):
-                for name, param in m.named_parameters():
-                    if 'weight' in name:
-                        print(f"Xavier init: {name}")
-                        nn.init.xavier_uniform_(param)
-                    elif 'bias' in name:
-                        nn.init.zeros_(param)
-            elif isinstance(m, nn.Linear):
-                nn.init.xavier_uniform_(m.weight)
+    @staticmethod
+    def from_pretrained(
+        model: DTCCAutoencoder, 
+        num_clusters: int,
+        tau_I: float = 0.5,
+        tau_C: float = 0.5,
+        weight_sharing: bool = False,
+        stable_svd: bool = False
+    ):
+        # Extract necessary parameters from the pre-trained model
+        input_dim = model.input_dim
+        num_layers = model.num_layers
+        hidden_dims = model.hidden_dims
+        dilation_rates = model.dilation_rates
 
-                print(f"Xavier init: {name}")
-                if m.bias is not None:
-                    nn.init.zeros_(m.bias)
-            elif isinstance(m, nn.LayerNorm):
-                nn.init.ones_(m.weight)
-                nn.init.zeros_(m.bias)
-    
+        # Initialize DTCC with the pre-trained autoencoder
+        dtcc = DTCC(
+            input_dim=input_dim,
+            num_layers=num_layers,
+            num_clusters=num_clusters,
+            hidden_dims=hidden_dims,
+            dilation_rates=dilation_rates,
+            tau_I=tau_I,
+            tau_C=tau_C,
+            weight_sharing=weight_sharing,
+            stable_svd=stable_svd
+        )
+
+        dtcc.set_autoencoder_weights(model)
+        return dtcc
+
+    def set_autoencoder_weights(self, model: DTCCAutoencoder):
+        # Load the pre-trained weights into the autoencoder
+        self.autoenc.load_state_dict(model.state_dict())
+        if not self.weight_sharing:
+            self.aug_autoenc.load_state_dict(model.state_dict())
+
     def get_num_clusters(self):
         return self.num_clusters
 
     def get_stable_svd(self):
         return self.stable_svd
+    
+    def encode(self, x):
+        return self.autoenc.encoder(x)
 
     def forward(self, x, x_aug):
         assert x.ndim == 3, f"Input must be 3D, got {x.shape}"
         # Original view
-        z = self.encoder(x)
-        x_recon = self.decoder(z, x.size(1))
-        
+        z, x_recon = self.autoenc(x)
+
         # Augmented view
         if self.weight_sharing:
-            z_aug = self.aug_encoder(x_aug)
-            x_aug_recon = self.aug_decoder(z_aug, x_aug.size(1))
-        else:
-            z_aug = self.encoder(x)
-            x_aug_recon = self.decoder(z_aug, x_aug.size(1))
+            z_aug, x_aug_recon = self.autoenc(x)           
+        else: 
+            z_aug, x_aug_recon = self.aug_autoenc(x_aug)
         return z, z_aug, x_recon, x_aug_recon
     
     def compute_reconstruction_loss(self, x, x_recon, x_aug, x_aug_recon):
         # L_recon-org = 1/n ∑ ||x_i - x̂_i||_2^2
         # ||x_i - x̂_i||_2^2 sums over sequence length and feature dimension for each sample.
         # Then, this sum is averaged over the batch (1/n).
-        print(f"X: {x.size()}")
-        print(f"X_recon: {x_recon.size()}")
-        recon_org = torch.sum((x - x_recon) ** 2, dim=(1, 2)).mean()
-        print(recon_org)
-        recon_aug = torch.sum((x_aug - x_aug_recon) ** 2, dim=(1, 2)).mean()
-        print(recon_aug)
+        recon_org = self.autoenc.compute_reconstruction_loss(x, x_recon)
+        recon_aug = self.autoenc.compute_reconstruction_loss(x_aug, x_aug_recon) # The loss is independent of the instance
         return recon_org + recon_aug
     
     def calculate_Q(self, z, z_aug):

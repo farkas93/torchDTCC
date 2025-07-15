@@ -6,6 +6,7 @@ import logging
 from typing import Dict
 from torchdtcc.dtcc.autoencoder import DTCCAutoencoder
 from torchdtcc.datasets.augmented_dataset import AugmentedDataset
+from torchinfo import summary
 
 class DTCCAutoencoderTrainer:
     def __init__(
@@ -17,7 +18,9 @@ class DTCCAutoencoderTrainer:
         num_epochs,
         gradient_clip = None,
         device="cpu",
-        lr_scheduler=None  # Added LR scheduler
+        lr_scheduler=None,
+        update_interval = 100,
+        patience=5  # Early stopping patience
     ):
         self.model = model
         self.device = device
@@ -26,14 +29,20 @@ class DTCCAutoencoderTrainer:
         self.optimizer = optimizer
         self.num_epochs = num_epochs
         self.grad_clip_max = gradient_clip
-        self.lr_scheduler = lr_scheduler  # Added LR scheduler
+        self.lr_scheduler = lr_scheduler
+        self.patience = patience
+        self.best_loss = float('inf')
+        self.epochs_no_improve = 0
+        self.update_interval = update_interval
 
     def run(self, save_path=None):
         self.model.train()
+        summary_batch = next(iter(self.dataloader))  # Get one batch
+        summary(self.model, input_size=summary_batch[0].shape)
         for epoch in range(self.num_epochs):
             epoch_loss = 0.0
             recon_losses = []
-            with tqdm(total=len(self.dataloader), desc=f'Epoch {epoch+1}/{self.num_epochs}') as pbar:
+            with tqdm(total=len(self.dataloader), desc=f'Epoch {epoch+1}/{self.num_epochs}', position=0, leave=(epoch + 1) % self.lr_scheduler.step_size == 0) as pbar:  
                 try:
                     for i, batch in enumerate(self.dataloader):
                         x, y = batch
@@ -70,23 +79,34 @@ class DTCCAutoencoderTrainer:
             avg_recon = sum(recon_losses) / len(recon_losses)
             self.log_loss(epoch, avg_recon)
 
-            if self.lr_scheduler:  # Step the scheduler
+            if avg_recon < self.best_loss:  # Save best model
+                self.best_loss = avg_recon
+                if save_path:
+                    self.save_model(save_path)
+                    logging.info(f"Best model saved at epoch {epoch+1} with loss {self.best_loss:.4f}")
+                self.epochs_no_improve = 0
+            else:
+                self.epochs_no_improve += 1
+                if self.epochs_no_improve == self.patience:
+                    logging.info(f"Early stopping at epoch {epoch+1}")
+                    break
+
+            if self.lr_scheduler:
                 self.lr_scheduler.step()
 
-        self.save_model(save_path)
+        if save_path:
+            self.model.load_state_dict(torch.load(save_path))
+        else:
+            logging.warning("save_path is not set. Best model was not saved and we return the last state of the model.")
         return self.model
 
-    def debug_svd(self, epoch, Q, Q_aug, svds):
-        pass
+   
 
     def log_loss(self, epoch, avg_recon):
         logging.info(f"Epoch {epoch+1}/{self.num_epochs} | avg recon: {avg_recon:.4f}")
 
-    def log_evaluation(self, epoch, metrics):
-        pass
-
     def save_model(self, save_path):
-        pass
+        torch.save(self.model.state_dict(), save_path)
 
     @staticmethod
     def _setup_model_environment(config: Dict, dataset: AugmentedDataset):
@@ -118,16 +138,18 @@ class DTCCAutoencoderTrainer:
 
     @staticmethod
     def from_config(config: Dict, dataset: AugmentedDataset):
-        trainer_cfg = config.get("trainer", {})
+        trainer_cfg = config.get("warmup", {})
         env = DTCCAutoencoderTrainer._setup_model_environment(config, dataset)
 
         lr_scheduler = None
+        update_interval = 100
         if "lr_scheduler" in trainer_cfg:
             scheduler_cfg = trainer_cfg["lr_scheduler"]
             if scheduler_cfg["type"] == "StepLR":
+                update_interval = scheduler_cfg.get("step_size", 100)
                 lr_scheduler = torch.optim.lr_scheduler.StepLR(
                     env["optimizer"],
-                    step_size=scheduler_cfg.get("step_size", 30),
+                    step_size=scheduler_cfg.get("step_size", 800),
                     gamma=scheduler_cfg.get("gamma", 0.1)
                 )
 
@@ -139,5 +161,7 @@ class DTCCAutoencoderTrainer:
             num_epochs=trainer_cfg.get("num_epochs", 100),
             gradient_clip=trainer_cfg.get("gradient_clip", None),
             device=env["device"],
-            lr_scheduler=lr_scheduler  # Added LR scheduler
+            lr_scheduler=lr_scheduler,
+            patience=trainer_cfg.get("patience", 100),
+            update_interval=update_interval
         )

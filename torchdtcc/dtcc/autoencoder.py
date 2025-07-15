@@ -35,29 +35,30 @@ class DTCCAutoencoder(nn.Module):
                  input_dim: int, 
                  num_layers: int,
                  hidden_dims: List[int], 
-                 dilation_rates: List[int]):
+                 dilation_rates: List[int],
+                 init="x/g"):
         super(DTCCAutoencoder, self).__init__()
         latent_dim = sum(hidden_dims) * 2 # the hidden dims times 2 for being bidirectional
+        self.input_dim = input_dim
+        self.num_layers = num_layers
+        self.hidden_dims = hidden_dims
+        self.dilation_rates = dilation_rates
         self.encoder = Encoder(input_dim, num_layers, hidden_dims, dilation_rates, latent_dim)
         self.decoder = Decoder(latent_dim, input_dim)
-        self._init_weights()
+        if init == "x/g":
+            self._init_weights()
     
     def _init_weights(self):
         # Xavier/Glorot init
         for m in self.modules():
-
-            print(f"Xavier init Module: {m}")
             if isinstance(m, nn.GRU):
                 for name, param in m.named_parameters():
                     if 'weight' in name:
-                        print(f"Xavier init: {name}")
                         nn.init.xavier_uniform_(param)
                     elif 'bias' in name:
                         nn.init.zeros_(param)
             elif isinstance(m, nn.Linear):
                 nn.init.xavier_uniform_(m.weight)
-
-                print(f"Xavier init: {name}")
                 if m.bias is not None:
                     nn.init.zeros_(m.bias)
             elif isinstance(m, nn.LayerNorm):
