@@ -1,9 +1,11 @@
 import yaml
 from torchdtcc.training.trainer import DTCCTrainer
+from torchdtcc.training.autoencoder_trainer import DTCCAutoencoderTrainer
 from torchdtcc.training.mlflow import MlFlowDTCCTrainer
 from torchdtcc.dtcc.clustering import Clusterer
 from torch.utils.data import DataLoader
 from torchdtcc.datasets.test.toy import ToyAugmentedDataset
+from torchdtcc.datasets.meat.arff_meat import MeatArffDataset
 from torchdtcc.datasets.plane.arff_plane import PlaneArffDataset
 from torchdtcc.training.hyperparam_search import HyperparameterSearch
 
@@ -21,7 +23,7 @@ with open("config.yaml", "r") as f:
 
 # Prepare dataset and dataloader
 data_cfg = config.get("data", {})
-dataset = PlaneArffDataset(path=data_cfg['path'], normalize=data_cfg['normalize'])
+dataset = MeatArffDataset(path=data_cfg['path'], normalize=data_cfg['normalize'])
 
 model_cfg = config.get("model", {})
 logging.info(f"STABLE SVD: {model_cfg['stable_svd']}")
@@ -47,6 +49,10 @@ def run_training():
     save_path = config.get("trainer", {}).get("save_path", "")
     return trainer.run(save_path=save_path)
 
+def run_debug_training():
+    trainer = DTCCAutoencoderTrainer.from_config(config, dataset)
+    return trainer.run("")
+
 def hyperparam_search():
     tauIs = []
     tauCs = []
@@ -56,10 +62,10 @@ def hyperparam_search():
     print(f"Best scoring {metric}: {best}")
 
 if __name__ == "__main__":
-    model = run_training()
+    model = run_debug_training()
     
     # For clustering in production
-    dataloader = DataLoader(dataset, batch_size=data_cfg.get("batch_size", 64), shuffle=False)
-    clusterer = use_model_clustering_example(model)
-    labels = clusterer.cluster(dataloader, method="kmeans")  # or "soft", "argmax"
-    print(f"resulting predictions:\n{labels}")
+    # dataloader = DataLoader(dataset, batch_size=data_cfg.get("batch_size", 64), shuffle=False)
+    # clusterer = use_model_clustering_example(model)
+    # labels = clusterer.cluster(dataloader, method="kmeans")  # or "soft", "argmax"
+    # print(f"resulting predictions:\n{labels}")

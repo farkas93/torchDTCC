@@ -9,11 +9,12 @@ class Encoder(nn.Module):
     def __init__(self, input_dim, num_layers, hidden_dim, dilation_rates, latent_dim):
         super(Encoder, self).__init__()
         self.dilated_rnn = DilatedRNN(input_dim, num_layers, hidden_dim, dilation_rates)
-        #self.norm = nn.LayerNorm(latent_dim)
+        self.norm = nn.LayerNorm(latent_dim)
         
     def forward(self, x):
         assert x.ndim == 3, f"Input must be 3D, got {x.shape}"
         z = self.dilated_rnn(x)
+        z = self.norm(z)
         return z
 
 
@@ -52,19 +53,24 @@ class DTCC(nn.Module):
         self.tau_C = tau_C  # Cluster temperature
         self.weight_sharing = weight_sharing
         self.stable_svd = stable_svd
-        self._init_weights()
+        #self._init_weights()
     
     def _init_weights(self):
         # Xavier/Glorot init
         for m in self.modules():
+
+            print(f"Xavier init Module: {m}")
             if isinstance(m, nn.GRU):
                 for name, param in m.named_parameters():
                     if 'weight' in name:
+                        print(f"Xavier init: {name}")
                         nn.init.xavier_uniform_(param)
                     elif 'bias' in name:
                         nn.init.zeros_(param)
             elif isinstance(m, nn.Linear):
                 nn.init.xavier_uniform_(m.weight)
+
+                print(f"Xavier init: {name}")
                 if m.bias is not None:
                     nn.init.zeros_(m.bias)
             elif isinstance(m, nn.LayerNorm):
@@ -96,11 +102,12 @@ class DTCC(nn.Module):
         # L_recon-org = 1/n ∑ ||x_i - x̂_i||_2^2
         # ||x_i - x̂_i||_2^2 sums over sequence length and feature dimension for each sample.
         # Then, this sum is averaged over the batch (1/n).
+        print(f"X: {x.size()}")
+        print(f"X_recon: {x_recon.size()}")
         recon_org = torch.sum((x - x_recon) ** 2, dim=(1, 2)).mean()
+        print(recon_org)
         recon_aug = torch.sum((x_aug - x_aug_recon) ** 2, dim=(1, 2)).mean()
-        return recon_org + recon_aug
-        recon_org = torch.mean((x - x_recon) ** 2)
-        recon_aug = torch.mean((x_aug - x_aug_recon) ** 2)
+        print(recon_aug)
         return recon_org + recon_aug
     
     def calculate_Q(self, z, z_aug):

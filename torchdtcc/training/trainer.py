@@ -37,10 +37,12 @@ class DTCCTrainer:
 
     def run(self, save_path=None):
         self.model.train()
+        num_clusters = self.model.get_num_clusters()
+
         Qs = {}
         Q_augs = {}
         for epoch in range(self.num_epochs):
-            epoch_loss = 0
+            epoch_loss = 0.0
             recon_losses, instance_losses, cd_losses, cluster_losses, total_losses = [], [], [], [], []
             with tqdm(total=len(self.dataloader), desc=f'Epoch {epoch+1}/{self.num_epochs}') as pbar:
             
@@ -51,14 +53,18 @@ class DTCCTrainer:
                         x = x.to(self.device)
                         x_aug = self.augment_time_series(x)
                         z, z_aug, x_recon, x_aug_recon = self.model(x, x_aug)
-
-                        if epoch % self.update_interval == 0:                        
-                            # Calculate Q with the combined embeddings
-                            Q, Q_aug, debug_dict = self.model.calculate_Q(z, z_aug)
-                            # Detach tensors before storing them
-                            Qs[i], Q_augs[i] = Q.detach(), Q_aug.detach()
-                            self.debug_svd(epoch, Qs[i], Q_augs[i], debug_dict)
-
+                        if epoch == 0:
+                            # Init Q's
+                            batch_size = x.size(0)
+                            # For a 2D tensor [batch_size, num_clusters]
+                            init_Q = torch.zeros(batch_size, num_clusters)
+                            # Set diagonal elements to 1 (up to min dimension)
+                            min_dim = min(batch_size, num_clusters)
+                            for j in range(min_dim):
+                                init_Q[j, j] = 1.0
+                            
+                            Qs[i] = init_Q.to(self.device)
+                            Q_augs[i] = init_Q.to(self.device)
                         cd_loss = self.model.compute_cluster_distribution_loss(z, z_aug, Qs[i], Q_augs[i])
                         recon_loss = self.model.compute_reconstruction_loss(x, x_recon, x_aug, x_aug_recon)
                         instance_loss = self.model.compute_instance_contrastive_loss(z, z_aug)
@@ -96,6 +102,13 @@ class DTCCTrainer:
                             torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=self.grad_clip_max)
                         self.optimizer.step()
                         epoch_loss += loss.item()
+
+                        if epoch > 1 and epoch % self.update_interval == 0:                        
+                            # Calculate Q with the combined embeddings
+                            Q, Q_aug, debug_dict = self.model.calculate_Q(z, z_aug)
+                            # Detach tensors before storing them
+                            Qs[i], Q_augs[i] = Q.detach(), Q_aug.detach()
+                            self.debug_svd(epoch, Qs[i], Q_augs[i], debug_dict)
 
                         pbar.set_postfix({'recon': f"{recon_loss.item():.3f}", 'inst': f"{instance_loss.item():.3f}", 'cd': f"{cd_loss.item():.3f}", 'clust': f"{cluster_loss.item():.3f}", 'total': f"{loss.item():.3f}"})
                         pbar.update(1)
@@ -180,5 +193,6 @@ class DTCCTrainer:
             num_epochs=trainer_cfg.get("num_epochs", 100),
             update_interval=trainer_cfg.get("update_interval", 5),
             gradient_clip=trainer_cfg.get("gradient_clip", None),
+            ablation=trainer_cfg.get("ablation", []),
             device=env["device"]
         )

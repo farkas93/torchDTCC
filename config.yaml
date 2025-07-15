@@ -6,32 +6,32 @@ model:
   num_clusters: 3
   hidden_dims: [100, 50, 50]  # Simplified architecture with consistent dimensions
   dilation_rates: [1, 4, 16]  # These look good
-  tau_I: 0.5  # Lower temperature for sharper instance contrasts
-  tau_C: 0.5  # Lower temperature for cluster contrasts
+  tau_I: 0.2  # Lower temperature for sharper instance contrasts
+  tau_C: 0.2  # Lower temperature for cluster contrasts
   stable_svd: false
   # In the paper the authors describe the autoencoder as two 
   # independent instances, which implies they are not siamese networks.
   # However, in contrastive learning usually the networks are siamese.
   # that is why the option for weight sharing is implemented.
-  weight_sharing: false
+  weight_sharing: true
 
 trainer:
   save_path: "dtcc_model_{}.pth"
-  learning_rate: 0.005
+  learning_rate: 0.00005
   weight_decay: 0.1
   lambda_cd: 2.0
-  num_epochs: 1000
+  num_epochs: 10000
   update_interval: 5
-  gradient_clip: 1.0
+  gradient_clip: 0
+  ablation: ["reconstruction"] # "contrastive", "all", "reconstruction", "distribution"
   mlflow:
     server_uri: "databricks" # remove or set to databricks if using on databricks
     # databricks example. databricks requires this scheme for experiment name
     experiment: "/Users/first.last@companydomain.com/my_experiment_name"
     run: 'my_run_1'
-    ablation: ["all"] # "contrastive", "all", "reconstruction", "distribution"
 
 data:
-  path: "./data/plane/"
+  path: "./data/meat/"
   batch_size: 64
   normalize: true 
 

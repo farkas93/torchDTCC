@@ -133,9 +133,9 @@ class MlFlowDTCCTrainer(DTCCTrainer):
             num_epochs=trainer_cfg.get("num_epochs", 100),
             update_interval=trainer_cfg.get("update_interval", 5),
             gradient_clip=trainer_cfg.get("gradient_clip", None),
+            ablation=trainer_cfg.get("ablation", []),
             device=env["device"],
             server_uri=mlflow_cfg.get("server_uri", "databricks"),
             experiment_name=mlflow_cfg.get("experiment", "MLflow_DTCC_Training"),
-            run_name=mlflow_cfg.get("run", "default_run"),
-            ablation=mlflow_cfg.get("ablation", [])
+            run_name=mlflow_cfg.get("run", "default_run")
         )
