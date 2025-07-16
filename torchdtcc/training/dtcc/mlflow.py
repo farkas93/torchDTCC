@@ -6,6 +6,7 @@ from torch.utils.data import DataLoader
 import logging
 from typing import Dict, List
 from torchdtcc.dtcc.dtcc import DTCC
+from torchdtcc.training.autoencoder.mlflow import MlFlowAutoencoderTrainer
 from torchdtcc.datasets.augmented_dataset import AugmentedDataset
 from .trainer import DTCCTrainer
 from sklearn.manifold import TSNE
@@ -22,6 +23,7 @@ class MlFlowDTCCTrainer(DTCCTrainer):
         optimizer,
         lambda_cd,
         num_epochs,
+        warmup_trainer=None,
         update_interval=5,
         gradient_clip = None,
         device="cpu",
@@ -30,8 +32,20 @@ class MlFlowDTCCTrainer(DTCCTrainer):
         run_name: str = "default_run",
         ablation: List = []
     ):
-        super().__init__(model, dataloader, augment_time_series, optimizer, lambda_cd, num_epochs, update_interval, gradient_clip, device, ablation)
+        super().__init__(
+            model=model, 
+            dataloader=dataloader, 
+            augment_time_series=augment_time_series, 
+            optimizer=optimizer, 
+            lambda_cd=lambda_cd, 
+            num_epochs=num_epochs,
+            warmup_trainer=warmup_trainer, 
+            update_interval=update_interval, 
+            gradient_clip=gradient_clip, 
+            device=device, 
+            ablation=ablation)
         if not server_uri == "databricks":
+            print(server_uri)
             mlflow.set_tracking_uri(server_uri)
         self.experiment_name = experiment_name
         self.run_name = run_name
@@ -94,7 +108,7 @@ class MlFlowDTCCTrainer(DTCCTrainer):
         all_z, all_y = [], []
         for x, y in self.dataloader:
             x = x.to(self.device)
-            z = self.model.encoder(x)
+            z = self.model.encode(x)
             all_z.append(z.detach().cpu().numpy())
             all_y.append(y.cpu().numpy())
         all_z = np.concatenate(all_z, axis=0)
@@ -121,9 +135,20 @@ class MlFlowDTCCTrainer(DTCCTrainer):
     @staticmethod
     def from_config(config: Dict, dataset: AugmentedDataset):
         trainer_cfg = config.get("trainer", {})
-        mlflow_cfg = trainer_cfg.get("mlflow", {})
+        mlflow_cfg = config.get("mlflow", {})
         env = DTCCTrainer._setup_model_environment(config, dataset)
 
+        warmup_trainer=None
+        if trainer_cfg.get("warmup", False):            
+            if "warmup" in config:
+                warmup_trainer = MlFlowAutoencoderTrainer.from_config(config, dataset)
+
+
+        experiment = mlflow_cfg.get("experiment", "MLflow_DTCC_Training")
+        if mlflow_cfg.get("server_uri") == "databricks":
+            experiment = mlflow_cfg.get("experiment_path").format(experiment)
+
+        run = "dtcc_" + mlflow_cfg.get("run", "default_run")
         return MlFlowDTCCTrainer(
             model=env["model"],
             dataloader=env["dataloader"],
@@ -131,11 +156,12 @@ class MlFlowDTCCTrainer(DTCCTrainer):
             optimizer=env["optimizer"],
             lambda_cd=trainer_cfg.get("lambda_cd", 1.0),
             num_epochs=trainer_cfg.get("num_epochs", 100),
+            warmup_trainer=warmup_trainer,
             update_interval=trainer_cfg.get("update_interval", 5),
             gradient_clip=trainer_cfg.get("gradient_clip", None),
             ablation=trainer_cfg.get("ablation", []),
             device=env["device"],
             server_uri=mlflow_cfg.get("server_uri", "databricks"),
-            experiment_name=mlflow_cfg.get("experiment", "MLflow_DTCC_Training"),
-            run_name=mlflow_cfg.get("run", "default_run")
+            experiment_name=experiment,
+            run_name=run
         )

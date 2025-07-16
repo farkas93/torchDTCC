@@ -2,6 +2,8 @@ import yaml
 from torchdtcc.training.dtcc.trainer import DTCCTrainer
 from torchdtcc.training.dtcc.mlflow import MlFlowDTCCTrainer
 from torchdtcc.training.autoencoder.trainer import DTCCAutoencoderTrainer
+from torchdtcc.training.autoencoder.mlflow import MlFlowAutoencoderTrainer
+
 from torchdtcc.dtcc.clustering import Clusterer
 from torch.utils.data import DataLoader
 from torchdtcc.datasets.test.toy import ToyAugmentedDataset
@@ -48,14 +50,14 @@ def use_model_clustering_example(model):
     return clusterer
 
 def run_training():    
-    trainer = DTCCTrainer.from_config(config, dataset)
+    trainer = MlFlowDTCCTrainer.from_config(config, dataset)
     warmup_path = config.get("warmup", {}).get("save_path", "")
     save_path = config.get("trainer", {}).get("save_path", "")
     trainer.warmup(warmup_path)
     return trainer.run(save_path=save_path.format(date))
 
 def run_warmup_training():
-    trainer = DTCCAutoencoderTrainer.from_config(config, dataset)
+    trainer = MlFlowAutoencoderTrainer.from_config(config, dataset)
     return trainer.run("pt_dtccae_{}".format(date))
 
 def hyperparam_search():

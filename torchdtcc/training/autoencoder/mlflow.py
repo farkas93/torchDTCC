@@ -95,19 +95,36 @@ class MlFlowAutoencoderTrainer(DTCCAutoencoderTrainer):
         trainer_cfg = config.get("warmup", {})
         mlflow_cfg = config.get("mlflow", {})
         env = DTCCAutoencoderTrainer._setup_model_environment(config, dataset)
+        
+        lr_scheduler = None
+        update_interval = 100
+        if "lr_scheduler" in trainer_cfg:
+            scheduler_cfg = trainer_cfg["lr_scheduler"]
+            if scheduler_cfg["type"] == "StepLR":
+                update_interval = scheduler_cfg.get("step_size", 100)
+                lr_scheduler = torch.optim.lr_scheduler.StepLR(
+                    env["optimizer"],
+                    step_size=scheduler_cfg.get("step_size", 800),
+                    gamma=scheduler_cfg.get("gamma", 0.1)
+                )
 
+        experiment = mlflow_cfg.get("experiment", "MLflow_DTCC_Training")
+        if mlflow_cfg.get("server_uri") == "databricks":
+            experiment = mlflow_cfg.get("experiment_path").format(experiment)
+
+        run = "dtcc_ae_" + mlflow_cfg.get("run", "default_run")
         return MlFlowAutoencoderTrainer(
             model=env["model"],
             dataloader=env["dataloader"],
             augment_time_series=dataset.augmentation,
             optimizer=env["optimizer"],
-            lambda_cd=trainer_cfg.get("lambda_cd", 1.0),
             num_epochs=trainer_cfg.get("num_epochs", 100),
-            update_interval=trainer_cfg.get("update_interval", 5),
             gradient_clip=trainer_cfg.get("gradient_clip", None),
-            ablation=trainer_cfg.get("ablation", []),
             device=env["device"],
+            lr_scheduler=lr_scheduler,
+            patience=trainer_cfg.get("patience", 100),
+            update_interval=update_interval,
             server_uri=mlflow_cfg.get("server_uri", "databricks"),
             experiment_name=mlflow_cfg.get("experiment", "MLflow_DTCC_Training"),
-            run_name=mlflow_cfg.get("run", "default_run")
+            run_name=run
         )
